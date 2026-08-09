@@ -55,6 +55,7 @@ export default function Tasks() {
   const [role, setRole] = useState<string | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
+  const [assigneeEmails, setAssigneeEmails] = useState<Record<string, string>>({})
   const [newTitle, setNewTitle] = useState('')
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
@@ -109,6 +110,17 @@ export default function Tasks() {
         })
       )
       setPhotoUrls(Object.fromEntries(entries.filter(([, url]) => url)) as Record<string, string>)
+
+      const assigneeIds = [...new Set(loadedTasks.map((t) => t.assigned_to).filter(Boolean))] as string[]
+      if (assigneeIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, email')
+          .in('id', assigneeIds)
+        setAssigneeEmails(
+          Object.fromEntries((profiles ?? []).map((p) => [p.id, p.email as string]))
+        )
+      }
     }
   }
 
@@ -122,7 +134,11 @@ export default function Tasks() {
 
     const { error } = await supabase
       .from('tasks')
-      .insert({ org_id: organization.id, title: newTitle })
+      .insert({
+        org_id: organization.id,
+        title: newTitle,
+        status: role === 'organizer' ? 'offen' : 'vorschlag',
+      })
 
     if (error) {
       setMessage('Fehler: ' + error.message)
@@ -324,6 +340,12 @@ export default function Tasks() {
                 <p className="font-medium text-gray-900">{task.title}</p>
                 <StatusBadge status={task.status} />
               </div>
+
+              {role === 'organizer' && task.assigned_to && assigneeEmails[task.assigned_to] && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Bearbeitet von: {assigneeEmails[task.assigned_to]}
+                </p>
+              )}
 
               {task.status === 'vorschlag' && role === 'organizer' && (
                 <div className="mt-3 flex gap-2">
