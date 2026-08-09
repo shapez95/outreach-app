@@ -22,12 +22,14 @@ type Organization = {
 const STATUS_LABELS: Record<string, string> = {
   offen: 'Offen',
   in_bearbeitung: 'In Bearbeitung',
-  erledigt: 'Erledigt',
+  zur_pruefung: 'Zur Prüfung eingereicht',
+  erledigt: 'Bestätigt',
 }
 
 const STATUS_STYLES: Record<string, string> = {
   offen: 'bg-gray-100 text-gray-700',
   in_bearbeitung: 'bg-amber-100 text-amber-800',
+  zur_pruefung: 'bg-blue-100 text-blue-800',
   erledigt: 'bg-emerald-100 text-emerald-800',
 }
 
@@ -45,6 +47,7 @@ export default function Tasks() {
   const [session, setSession] = useState<Session | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
   const [organization, setOrganization] = useState<Organization | null>(null)
+  const [role, setRole] = useState<string | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [newTitle, setNewTitle] = useState('')
   const [message, setMessage] = useState('')
@@ -69,12 +72,14 @@ export default function Tasks() {
 
     const { data: memberships } = await supabase
       .from('memberships')
-      .select('organizations(id, name)')
+      .select('role, organizations(id, name)')
       .eq('profile_id', session.session.user.id)
       .limit(1)
 
-    const org = (memberships?.[0]?.organizations as unknown as Organization) ?? null
+    const membership = memberships?.[0] ?? null
+    const org = (membership?.organizations as unknown as Organization) ?? null
     setOrganization(org)
+    setRole(membership?.role ?? null)
     setOrgChecked(true)
 
     if (org) {
@@ -107,12 +112,8 @@ export default function Tasks() {
     }
   }
 
-  async function handleClaim(taskId: string) {
-    if (!session) return
-    const { error } = await supabase
-      .from('tasks')
-      .update({ status: 'in_bearbeitung', assigned_to: session.user.id })
-      .eq('id', taskId)
+  async function updateTask(taskId: string, changes: Partial<Pick<Task, 'status' | 'assigned_to'>>) {
+    const { error } = await supabase.from('tasks').update(changes).eq('id', taskId)
 
     if (error) {
       setMessage('Fehler: ' + error.message)
@@ -121,17 +122,21 @@ export default function Tasks() {
     }
   }
 
-  async function handleComplete(taskId: string) {
-    const { error } = await supabase
-      .from('tasks')
-      .update({ status: 'erledigt' })
-      .eq('id', taskId)
+  function handleClaim(taskId: string) {
+    if (!session) return
+    updateTask(taskId, { status: 'in_bearbeitung', assigned_to: session.user.id })
+  }
 
-    if (error) {
-      setMessage('Fehler: ' + error.message)
-    } else {
-      loadTasks()
-    }
+  function handleSubmitForReview(taskId: string) {
+    updateTask(taskId, { status: 'zur_pruefung' })
+  }
+
+  function handleConfirm(taskId: string) {
+    updateTask(taskId, { status: 'erledigt' })
+  }
+
+  function handleReject(taskId: string) {
+    updateTask(taskId, { status: 'in_bearbeitung' })
   }
 
   if (loadingSession) {
@@ -229,15 +234,36 @@ export default function Tasks() {
 
               {task.status === 'in_bearbeitung' && task.assigned_to === session.user.id && (
                 <button
-                  onClick={() => handleComplete(task.id)}
-                  className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                  onClick={() => handleSubmitForReview(task.id)}
+                  className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Als erledigt markieren
+                  Zur Prüfung einreichen
                 </button>
               )}
 
               {task.status === 'in_bearbeitung' && task.assigned_to !== session.user.id && (
                 <p className="mt-3 text-sm text-gray-500">wird bereits bearbeitet</p>
+              )}
+
+              {task.status === 'zur_pruefung' && role === 'organizer' && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => handleConfirm(task.id)}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                  >
+                    Bestätigen
+                  </button>
+                  <button
+                    onClick={() => handleReject(task.id)}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Ablehnen
+                  </button>
+                </div>
+              )}
+
+              {task.status === 'zur_pruefung' && role !== 'organizer' && (
+                <p className="mt-3 text-sm text-gray-500">Wartet auf Bestätigung durch den Organisator</p>
               )}
             </li>
           ))}
