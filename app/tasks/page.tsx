@@ -59,6 +59,7 @@ export default function Tasks() {
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null)
+  const [statusFilters, setStatusFilters] = useState<string[]>([])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -205,6 +206,12 @@ export default function Tasks() {
     updateTask(taskId, { status: 'in_bearbeitung' })
   }
 
+  function toggleStatusFilter(status: string) {
+    setStatusFilters((current) =>
+      current.includes(status) ? current.filter((s) => s !== status) : [...current, status]
+    )
+  }
+
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
@@ -278,8 +285,37 @@ export default function Tasks() {
 
         {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
 
-        <ul className="mt-6 space-y-3">
-          {tasks.map((task) => (
+        <details className="mt-5 w-fit">
+          <summary className="cursor-pointer list-none rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            Status filtern {statusFilters.length > 0 ? `(${statusFilters.length})` : '(Alle)'}
+          </summary>
+          <div className="mt-2 space-y-1 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+            {['vorschlag', 'offen', 'in_bearbeitung', 'zur_pruefung', 'erledigt'].map((status) => (
+              <label key={status} className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={statusFilters.includes(status)}
+                  onChange={() => toggleStatusFilter(status)}
+                  className="rounded border-gray-300"
+                />
+                {STATUS_LABELS[status]}
+              </label>
+            ))}
+            {statusFilters.length > 0 && (
+              <button
+                onClick={() => setStatusFilters([])}
+                className="mt-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+              >
+                Filter zurücksetzen
+              </button>
+            )}
+          </div>
+        </details>
+
+        <ul className="mt-4 space-y-3">
+          {tasks
+            .filter((task) => statusFilters.length === 0 || statusFilters.includes(task.status))
+            .map((task) => (
             <li
               key={task.id}
               className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
@@ -404,8 +440,9 @@ export default function Tasks() {
               )}
             </li>
           ))}
-          {tasks.length === 0 && (
-            <li className="text-sm text-gray-500">Noch keine Aufgaben.</li>
+          {tasks.filter((task) => statusFilters.length === 0 || statusFilters.includes(task.status))
+            .length === 0 && (
+            <li className="text-sm text-gray-500">Keine Aufgaben mit diesem Status.</li>
           )}
         </ul>
       </div>
