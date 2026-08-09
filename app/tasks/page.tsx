@@ -12,6 +12,8 @@ type Task = {
   status: string
   assigned_to: string | null
   proof_path: string | null
+  comment: string | null
+  conversation_count: number
   created_at: string
 }
 
@@ -131,7 +133,7 @@ export default function Tasks() {
 
   async function updateTask(
     taskId: string,
-    changes: Partial<Pick<Task, 'status' | 'assigned_to' | 'proof_path'>>
+    changes: Partial<Pick<Task, 'status' | 'assigned_to' | 'proof_path' | 'comment' | 'conversation_count'>>
   ) {
     const { error } = await supabase.from('tasks').update(changes).eq('id', taskId)
 
@@ -165,7 +167,10 @@ export default function Tasks() {
     e.preventDefault()
     if (!organization) return
 
-    const fileInput = e.currentTarget.elements.namedItem('photo') as HTMLInputElement
+    const form = e.currentTarget
+    const fileInput = form.elements.namedItem('photo') as HTMLInputElement
+    const commentInput = form.elements.namedItem('comment') as HTMLTextAreaElement
+    const conversationInput = form.elements.namedItem('conversation_count') as HTMLInputElement
     const file = fileInput.files?.[0]
     if (!file) return
 
@@ -183,7 +188,12 @@ export default function Tasks() {
       return
     }
 
-    await updateTask(task.id, { status: 'zur_pruefung', proof_path: path })
+    await updateTask(task.id, {
+      status: 'zur_pruefung',
+      proof_path: path,
+      comment: commentInput.value || null,
+      conversation_count: Number(conversationInput.value) || 0,
+    })
     setUploadingTaskId(null)
   }
 
@@ -321,6 +331,24 @@ export default function Tasks() {
                     required
                     className="block w-full text-sm text-gray-600"
                   />
+                  <textarea
+                    name="comment"
+                    placeholder="Kommentar (optional), z.B. was ist passiert?"
+                    rows={2}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600">
+                      Anzahl geführter Gespräche
+                    </label>
+                    <input
+                      type="number"
+                      name="conversation_count"
+                      min={0}
+                      defaultValue={0}
+                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
                   <button
                     type="submit"
                     disabled={uploadingTaskId === task.id}
@@ -335,13 +363,23 @@ export default function Tasks() {
                 <p className="mt-3 text-sm text-gray-500">wird bereits bearbeitet</p>
               )}
 
-              {(task.status === 'zur_pruefung' || task.status === 'erledigt') && photoUrls[task.id] && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={photoUrls[task.id]}
-                  alt="Nachweis-Foto"
-                  className="mt-3 max-h-64 w-full rounded-lg object-cover"
-                />
+              {(task.status === 'zur_pruefung' || task.status === 'erledigt') && (
+                <div className="mt-3 space-y-2">
+                  {photoUrls[task.id] && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={photoUrls[task.id]}
+                      alt="Nachweis-Foto"
+                      className="max-h-64 w-full rounded-lg object-cover"
+                    />
+                  )}
+                  <p className="text-sm text-gray-600">
+                    Geführte Gespräche: <span className="font-medium">{task.conversation_count}</span>
+                  </p>
+                  {task.comment && (
+                    <p className="rounded-lg bg-gray-50 p-2 text-sm text-gray-700">{task.comment}</p>
+                  )}
+                </div>
               )}
 
               {task.status === 'zur_pruefung' && role === 'organizer' && (
