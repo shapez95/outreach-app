@@ -28,6 +28,11 @@ type Organization = {
   name: string
 }
 
+type Membership = {
+  role: string
+  organizations: Organization | null
+}
+
 type Area = {
   id: string
   name: string
@@ -93,14 +98,18 @@ export default function Tasks() {
     const { data: session } = await supabase.auth.getSession()
     if (!session.session) return
 
-    const { data: memberships } = await supabase
+    const { data: membershipData } = await supabase
       .from('memberships')
       .select('role, organizations(id, name)')
       .eq('profile_id', session.session.user.id)
-      .limit(1)
+      .order('created_at', { ascending: true })
 
-    const membership = memberships?.[0] ?? null
-    const org = (membership?.organizations as unknown as Organization) ?? null
+    const allMemberships = (membershipData as unknown as Membership[]) ?? []
+
+    const savedOrgId = typeof window !== 'undefined' ? localStorage.getItem('currentOrgId') : null
+    const membership =
+      allMemberships.find((m) => m.organizations?.id === savedOrgId) ?? allMemberships[0] ?? null
+    const org = membership?.organizations ?? null
     setOrganization(org)
     setRole(membership?.role ?? null)
     setOrgChecked(true)
@@ -314,6 +323,7 @@ export default function Tasks() {
             </Link>
           </div>
         </div>
+
 
         <form onSubmit={handleAddTask} className="mt-5 space-y-2">
           <div className="flex gap-2">

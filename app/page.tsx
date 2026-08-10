@@ -15,6 +15,7 @@ export default function Home() {
   const [loadingSession, setLoadingSession] = useState(true)
   const [memberships, setMemberships] = useState<Membership[]>([])
   const [totalPoints, setTotalPoints] = useState(0)
+  const [inviteCodes, setInviteCodes] = useState<Record<string, string>>({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -52,6 +53,13 @@ export default function Home() {
     await supabase.auth.signOut()
   }
 
+  async function handleShowCode(orgId: string) {
+    const { data, error } = await supabase.rpc('get_invite_code', { target_org_id: orgId })
+    if (!error && data) {
+      setInviteCodes((current) => ({ ...current, [orgId]: data }))
+    }
+  }
+
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
@@ -75,18 +83,6 @@ export default function Home() {
                 Deine Punkte: <span className="font-semibold text-emerald-700">{totalPoints}</span>
               </p>
               <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/tasks"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-                >
-                  Zu den Aufgaben →
-                </Link>
-                <Link
-                  href="/areas"
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Gebiete
-                </Link>
                 <Link
                   href="/join"
                   className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -131,12 +127,36 @@ export default function Home() {
               {memberships.map((m) => (
                 <li
                   key={m.organizations?.id}
-                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm"
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm"
                 >
-                  <span className="font-medium text-gray-900">{m.organizations?.name}</span>
-                  <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-                    {m.role === 'organizer' ? 'Organisator' : 'Helfer'}
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <Link
+                      href="/tasks"
+                      onClick={() => m.organizations && localStorage.setItem('currentOrgId', m.organizations.id)}
+                      className="font-medium text-gray-900 hover:text-indigo-600"
+                    >
+                      {m.organizations?.name}
+                    </Link>
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                      {m.role === 'organizer' ? 'Organisator' : 'Helfer'}
+                    </span>
+                  </div>
+                  {m.role === 'organizer' && m.organizations && (
+                    <div className="mt-2">
+                      {inviteCodes[m.organizations.id] ? (
+                        <p className="font-mono text-sm font-semibold tracking-wider text-gray-900">
+                          Code: {inviteCodes[m.organizations.id]}
+                        </p>
+                      ) : (
+                        <button
+                          onClick={() => handleShowCode(m.organizations!.id)}
+                          className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                        >
+                          Einladungscode anzeigen
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </li>
               ))}
               {memberships.length === 0 && (

@@ -23,6 +23,11 @@ type Task = {
   status: string
 }
 
+type Membership = {
+  role: string
+  organizations: Organization | null
+}
+
 export default function Areas() {
   const [session, setSession] = useState<Session | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
@@ -51,14 +56,18 @@ export default function Areas() {
     const { data: session } = await supabase.auth.getSession()
     if (!session.session) return
 
-    const { data: memberships } = await supabase
+    const { data: membershipData } = await supabase
       .from('memberships')
       .select('role, organizations(id, name)')
       .eq('profile_id', session.session.user.id)
-      .limit(1)
+      .order('created_at', { ascending: true })
 
-    const membership = memberships?.[0] ?? null
-    const org = (membership?.organizations as unknown as Organization) ?? null
+    const allMemberships = (membershipData as unknown as Membership[]) ?? []
+
+    const savedOrgId = typeof window !== 'undefined' ? localStorage.getItem('currentOrgId') : null
+    const membership =
+      allMemberships.find((m) => m.organizations?.id === savedOrgId) ?? allMemberships[0] ?? null
+    const org = membership?.organizations ?? null
     setOrganization(org)
     setRole(membership?.role ?? null)
     setOrgChecked(true)
