@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
@@ -16,7 +15,6 @@ export default function BottomNav() {
   const [memberships, setMemberships] = useState<Membership[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [inviteCodes, setInviteCodes] = useState<Record<string, string>>({})
-  const router = useRouter()
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -49,8 +47,9 @@ export default function BottomNav() {
 
   function handlePickOrg(orgId: string) {
     localStorage.setItem('currentOrgId', orgId)
+    localStorage.removeItem('currentAreaId')
     setPickerOpen(false)
-    router.push('/tasks')
+    window.location.href = '/areas'
   }
 
   if (!session) return null

@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { Session } from '@supabase/supabase-js'
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
+import { point } from '@turf/helpers'
+import type { Feature, Geometry } from 'geojson'
 import { supabase } from '@/lib/supabase'
 
 type Task = {
@@ -54,6 +57,7 @@ type Membership = {
 type Area = {
   id: string
   name: string
+  boundary: Feature<Geometry> | Geometry | null
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -99,6 +103,13 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
   return 2 * R * Math.asin(Math.sqrt(h))
 }
 
+function isWithinArea(area: Area, lat: number, lng: number): boolean {
+  if (!area.boundary) return true
+  const geometry = area.boundary as Geometry
+  if (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon') return true
+  return booleanPointInPolygon(point([lng, lat]), geometry)
+}
+
 function StatusBadge({ status }: { status: string }) {
   return (
     <span
@@ -128,6 +139,7 @@ export default function Tasks() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
+  const [filterAreaId, setFilterAreaId] = useState<string | null>(null)
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null)
   const [statusFilters, setStatusFilters] = useState<string[]>([])
   const [sortMode, setSortMode] = useState<'newest' | 'oldest' | 'distance'>('newest')
@@ -171,7 +183,7 @@ export default function Tasks() {
     if (org) {
       const { data: areaData } = await supabase
         .from('areas')
-        .select('id, name')
+        .select('id, name, boundary')
         .eq('org_id', org.id)
         .order('name', { ascending: true })
       setAreas(areaData ?? [])
@@ -210,13 +222,39 @@ export default function Tasks() {
 
   useEffect(() => {
     loadTasks()
+    const savedAreaId = typeof window !== 'undefined' ? localStorage.getItem('currentAreaId') : null
+    if (savedAreaId) {
+      setFilterAreaId(savedAreaId)
+      setNewAreaId(savedAreaId)
+    }
   }, [])
+
+  function handleClearAreaFilter() {
+    localStorage.removeItem('currentAreaId')
+    setFilterAreaId(null)
+  }
 
   async function handleAddTask(e: React.FormEvent) {
     e.preventDefault()
     if (!organization) return
 
-    const coords = newAddress ? await geocodeAddress(newAddress) : null
+    let coords: { lat: number; lng: number } | null = null
+    const selectedArea = areas.find((a) => a.id === newAreaId)
+
+    if (newAddress) {
+      coords = await geocodeAddress(newAddress)
+
+      if (selectedArea?.boundary) {
+        if (!coords) {
+          setMessage(`Fehler: Adresse "${newAddress}" konnte nicht gefunden werden. Bitte prüfen.`)
+          return
+        }
+        if (!isWithinArea(selectedArea, coords.lat, coords.lng)) {
+          setMessage(`Fehler: Die Adresse liegt außerhalb des Gebiets "${selectedArea.name}".`)
+          return
+        }
+      }
+    }
 
     const { error } = await supabase
       .from('tasks')
@@ -304,10 +342,26 @@ export default function Tasks() {
       }))
     }
 
+    const selectedArea = areas.find((a) => a.id === bulkAreaId)
+
     setBulkSubmitting(true)
     setMessage('')
     for (const row of rows) {
       const coords = await geocodeAddress(row.address)
+
+      if (selectedArea?.boundary) {
+        if (!coords) {
+          setMessage(`Fehler: Adresse "${row.address}" konnte nicht gefunden werden. Bitte prüfen.`)
+          setBulkSubmitting(false)
+          return
+        }
+        if (!isWithinArea(selectedArea, coords.lat, coords.lng)) {
+          setMessage(`Fehler: "${row.address}" liegt außerhalb des Gebiets "${selectedArea.name}". Keine der Aufgaben wurde angelegt.`)
+          setBulkSubmitting(false)
+          return
+        }
+      }
+
       row.lat = coords?.lat ?? null
       row.lng = coords?.lng ?? null
       await sleep(1100)
@@ -389,6 +443,18 @@ export default function Tasks() {
     const addressChanged = address !== (originalTask?.address ?? '')
 
     const coords = addressChanged && address ? await geocodeAddress(address) : null
+    const selectedArea = areas.find((a) => a.id === areaId)
+
+    if (addressChanged && address && selectedArea?.boundary) {
+      if (!coords) {
+        setMessage(`Fehler: Adresse "${address}" konnte nicht gefunden werden. Bitte prüfen.`)
+        return
+      }
+      if (!isWithinArea(selectedArea, coords.lat, coords.lng)) {
+        setMessage(`Fehler: Die Adresse liegt außerhalb des Gebiets "${selectedArea.name}".`)
+        return
+      }
+    }
 
     await updateTask(taskId, {
       title,
@@ -529,11 +595,12 @@ export default function Tasks() {
       <div className="w-full max-w-lg">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">
-            Aufgaben{organization ? ` – ${organization.name}` : ''}
+            Aufgaben
+            {filterAreaId ? ` – ${areas.find((a) => a.id === filterAreaId)?.name ?? ''}` : ''}
           </h1>
           <div className="flex items-center gap-3">
             <Link href="/areas" className="text-sm font-medium text-teal-600 hover:text-teal-700">
-              Gebiete
+              Gebiete & Karte
             </Link>
             <Link href="/" className="text-sm font-medium text-teal-600 hover:text-teal-700">
               ← Zurück
@@ -541,6 +608,14 @@ export default function Tasks() {
           </div>
         </div>
 
+        {filterAreaId && (
+          <button
+            onClick={handleClearAreaFilter}
+            className="mt-1 text-xs font-medium text-teal-600 hover:text-teal-700"
+          >
+            Alle Aufgaben zeigen (Gebietsfilter aufheben)
+          </button>
+        )}
 
         <form onSubmit={handleAddTask} className="mt-5 space-y-2">
           <div className="flex gap-2">
@@ -729,7 +804,11 @@ export default function Tasks() {
 
         <ul className="mt-4 space-y-3">
           {sortTasks(
-            tasks.filter((task) => statusFilters.length === 0 || statusFilters.includes(task.status))
+            tasks.filter(
+              (task) =>
+                (statusFilters.length === 0 || statusFilters.includes(task.status)) &&
+                (!filterAreaId || task.area_id === filterAreaId)
+            )
           )
             .map((task) => (
             <li
@@ -950,9 +1029,12 @@ export default function Tasks() {
               )}
             </li>
           ))}
-          {tasks.filter((task) => statusFilters.length === 0 || statusFilters.includes(task.status))
-            .length === 0 && (
-            <li className="text-sm text-gray-500">Keine Aufgaben mit diesem Status.</li>
+          {tasks.filter(
+            (task) =>
+              (statusFilters.length === 0 || statusFilters.includes(task.status)) &&
+              (!filterAreaId || task.area_id === filterAreaId)
+          ).length === 0 && (
+            <li className="text-sm text-gray-500">Keine Aufgaben mit diesem Status/Gebiet.</li>
           )}
         </ul>
       </div>
