@@ -14,10 +14,16 @@ type Task = {
   proof_path: string | null
   comment: string | null
   conversation_count: number
+  area_id: string | null
   created_at: string
 }
 
 type Organization = {
+  id: string
+  name: string
+}
+
+type Area = {
   id: string
   name: string
 }
@@ -54,6 +60,8 @@ export default function Tasks() {
   const [organization, setOrganization] = useState<Organization | null>(null)
   const [role, setRole] = useState<string | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
+  const [areas, setAreas] = useState<Area[]>([])
+  const [newAreaId, setNewAreaId] = useState('')
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [assigneeEmails, setAssigneeEmails] = useState<Record<string, string>>({})
   const [newTitle, setNewTitle] = useState('')
@@ -92,6 +100,13 @@ export default function Tasks() {
     setOrgChecked(true)
 
     if (org) {
+      const { data: areaData } = await supabase
+        .from('areas')
+        .select('id, name')
+        .eq('org_id', org.id)
+        .order('name', { ascending: true })
+      setAreas(areaData ?? [])
+
       const { data } = await supabase
         .from('tasks')
         .select()
@@ -137,6 +152,7 @@ export default function Tasks() {
       .insert({
         org_id: organization.id,
         title: newTitle,
+        area_id: newAreaId || null,
         status: role === 'organizer' ? 'offen' : 'vorschlag',
       })
 
@@ -144,6 +160,7 @@ export default function Tasks() {
       setMessage('Fehler: ' + error.message)
     } else {
       setNewTitle('')
+      setNewAreaId('')
       loadTasks()
     }
   }
@@ -277,26 +294,45 @@ export default function Tasks() {
           <h1 className="text-2xl font-bold text-gray-900">
             Aufgaben{organization ? ` – ${organization.name}` : ''}
           </h1>
-          <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
-            ← Zurück
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/areas" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+              Gebiete
+            </Link>
+            <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+              ← Zurück
+            </Link>
+          </div>
         </div>
 
-        <form onSubmit={handleAddTask} className="mt-5 flex gap-2">
-          <input
-            type="text"
-            placeholder="Neue Aufgabe, z.B. Flyer in Eimsbüttel verteilen"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            required
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        <form onSubmit={handleAddTask} className="mt-5 space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Neue Aufgabe, z.B. Flyer in Eimsbüttel verteilen"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              required
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              Anlegen
+            </button>
+          </div>
+          <select
+            value={newAreaId}
+            onChange={(e) => setNewAreaId(e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           >
-            Anlegen
-          </button>
+            <option value="">Kein Gebiet</option>
+            {areas.map((area) => (
+              <option key={area.id} value={area.id}>
+                {area.name}
+              </option>
+            ))}
+          </select>
         </form>
 
         {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
@@ -337,7 +373,14 @@ export default function Tasks() {
               className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
             >
               <div className="flex items-start justify-between gap-3">
-                <p className="font-medium text-gray-900">{task.title}</p>
+                <div>
+                  <p className="font-medium text-gray-900">{task.title}</p>
+                  {task.area_id && (
+                    <p className="text-xs text-gray-500">
+                      {areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'}
+                    </p>
+                  )}
+                </div>
                 <StatusBadge status={task.status} />
               </div>
 
