@@ -17,11 +17,29 @@ type Task = {
   area_id: string | null
   points: number
   address: string | null
+  address_list: string | null
+  category: string | null
+  lat: number | null
+  lng: number | null
   created_at: string
 }
 
 const POINTS_PER_TASK = 10
 const POINTS_PER_CONVERSATION = 5
+const MAX_HOUSEHOLDS_PER_BUNDLE = 10
+
+const CATEGORY_LABELS: Record<string, string> = {
+  privathaushalt: 'Privathaushalt',
+  restaurant: 'Restaurant',
+  supermarkt: 'Supermarkt',
+  fitnessstudio: 'Fitnessstudio',
+  sonstiges: 'Sonstiges',
+}
+
+const BRAND_SUGGESTIONS: Record<string, string[]> = {
+  supermarkt: ['REWE', 'Edeka', 'Aldi'],
+  fitnessstudio: ['McFit', 'FitX', 'Clever Fit'],
+}
 
 type Organization = {
   id: string
@@ -54,6 +72,33 @@ const STATUS_STYLES: Record<string, string> = {
   erledigt: 'bg-emerald-100 text-emerald-800',
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`
+    )
+    const results = await res.json()
+    const first = results?.[0]
+    if (!first) return null
+    return { lat: parseFloat(first.lat), lng: parseFloat(first.lon) }
+  } catch {
+    return null
+  }
+}
+
+function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180
+  const lat1 = (a.lat * Math.PI) / 180
+  const lat2 = (b.lat * Math.PI) / 180
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2)
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
 function StatusBadge({ status }: { status: string }) {
   return (
     <span
@@ -76,10 +121,18 @@ export default function Tasks() {
   const [assigneeEmails, setAssigneeEmails] = useState<Record<string, string>>({})
   const [newTitle, setNewTitle] = useState('')
   const [newAddress, setNewAddress] = useState('')
+  const [bulkAreaId, setBulkAreaId] = useState('')
+  const [bulkCategory, setBulkCategory] = useState('privathaushalt')
+  const [bulkAddresses, setBulkAddresses] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null)
   const [statusFilters, setStatusFilters] = useState<string[]>([])
+  const [sortMode, setSortMode] = useState<'newest' | 'oldest' | 'distance'>('newest')
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [locationError, setLocationError] = useState('')
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -163,6 +216,8 @@ export default function Tasks() {
     e.preventDefault()
     if (!organization) return
 
+    const coords = newAddress ? await geocodeAddress(newAddress) : null
+
     const { error } = await supabase
       .from('tasks')
       .insert({
@@ -170,6 +225,8 @@ export default function Tasks() {
         title: newTitle,
         area_id: newAreaId || null,
         address: newAddress || null,
+        lat: coords?.lat ?? null,
+        lng: coords?.lng ?? null,
         status: role === 'organizer' ? 'offen' : 'vorschlag',
       })
 
@@ -179,6 +236,91 @@ export default function Tasks() {
       setNewTitle('')
       setNewAreaId('')
       setNewAddress('')
+      loadTasks()
+    }
+  }
+
+  async function handleBulkCreate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!organization) return
+
+    const entries = bulkAddresses
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [first, ...rest] = line.split(',')
+        const address = rest.length > 0 ? rest.join(',').trim() : first.trim()
+        const name = rest.length > 0 ? first.trim() : null
+        return { name, address }
+      })
+    if (entries.length === 0) return
+
+    if (bulkCategory !== 'privathaushalt' && entries.some((e) => !e.name)) {
+      setMessage(
+        'Fehler: Bitte bei jeder Zeile einen Namen angeben (Format "Name, Adresse") – nur bei Privathaushalt sind reine Adressen erlaubt.'
+      )
+      return
+    }
+
+    const categoryLabel = CATEGORY_LABELS[bulkCategory] ?? bulkCategory
+    const areaName = areas.find((a) => a.id === bulkAreaId)?.name
+
+    let rows: {
+      org_id: string
+      title: string
+      address: string
+      address_list: string | null
+      area_id: string | null
+      category: string
+      status: string
+      lat?: number | null
+      lng?: number | null
+    }[]
+
+    if (bulkCategory === 'privathaushalt') {
+      const chunks: { name: string | null; address: string }[][] = []
+      for (let i = 0; i < entries.length; i += MAX_HOUSEHOLDS_PER_BUNDLE) {
+        chunks.push(entries.slice(i, i + MAX_HOUSEHOLDS_PER_BUNDLE))
+      }
+      rows = chunks.map((chunk) => ({
+        org_id: organization.id,
+        title: `${chunk.length} Privathaushalte${areaName ? ` in ${areaName}` : ''}`,
+        address: chunk[0].address,
+        address_list: chunk.map((c) => c.address).join('; '),
+        area_id: bulkAreaId || null,
+        category: bulkCategory,
+        status: 'offen',
+      }))
+    } else {
+      rows = entries.map(({ name, address }) => ({
+        org_id: organization.id,
+        title: name ?? `${categoryLabel}: ${address}`,
+        address,
+        address_list: null,
+        area_id: bulkAreaId || null,
+        category: bulkCategory,
+        status: 'offen',
+      }))
+    }
+
+    setBulkSubmitting(true)
+    setMessage('')
+    for (const row of rows) {
+      const coords = await geocodeAddress(row.address)
+      row.lat = coords?.lat ?? null
+      row.lng = coords?.lng ?? null
+      await sleep(1100)
+    }
+
+    const { error } = await supabase.from('tasks').insert(rows)
+    setBulkSubmitting(false)
+
+    if (error) {
+      setMessage('Fehler: ' + error.message)
+    } else {
+      setBulkAddresses('')
+      setBulkOpen(false)
       loadTasks()
     }
   }
@@ -197,6 +339,8 @@ export default function Tasks() {
         | 'area_id'
         | 'title'
         | 'address'
+        | 'lat'
+        | 'lng'
       >
     >
   ) {
@@ -223,17 +367,34 @@ export default function Tasks() {
     }
   }
 
+  async function handleDeleteTask(taskId: string) {
+    if (!window.confirm('Diese Aufgabe wirklich endgültig löschen?')) return
+
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId)
+
+    if (error) {
+      setMessage('Fehler: ' + error.message)
+    } else {
+      loadTasks()
+    }
+  }
+
   async function handleSaveEdit(e: React.FormEvent<HTMLFormElement>, taskId: string) {
     e.preventDefault()
     const form = e.currentTarget
     const title = (form.elements.namedItem('edit_title') as HTMLInputElement).value
     const address = (form.elements.namedItem('edit_address') as HTMLInputElement).value
     const areaId = (form.elements.namedItem('edit_area') as HTMLSelectElement).value
+    const originalTask = tasks.find((t) => t.id === taskId)
+    const addressChanged = address !== (originalTask?.address ?? '')
+
+    const coords = addressChanged && address ? await geocodeAddress(address) : null
 
     await updateTask(taskId, {
       title,
       address: address || null,
       area_id: areaId || null,
+      ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
     })
     setEditingTaskId(null)
   }
@@ -290,6 +451,35 @@ export default function Tasks() {
     setStatusFilters((current) =>
       current.includes(status) ? current.filter((s) => s !== status) : [...current, status]
     )
+  }
+
+  function handleSortByDistance() {
+    setLocationError('')
+    if (!navigator.geolocation) {
+      setLocationError('Standort wird von diesem Browser nicht unterstützt.')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude })
+        setSortMode('distance')
+      },
+      () => setLocationError('Standort konnte nicht ermittelt werden. Bitte Standortfreigabe erlauben.')
+    )
+  }
+
+  function sortTasks(list: Task[]) {
+    if (sortMode === 'oldest') {
+      return [...list].sort((a, b) => a.created_at.localeCompare(b.created_at))
+    }
+    if (sortMode === 'distance' && userLocation) {
+      return [...list].sort((a, b) => {
+        const distA = a.lat != null && a.lng != null ? distanceKm(userLocation, { lat: a.lat, lng: a.lng }) : Infinity
+        const distB = b.lat != null && b.lng != null ? distanceKm(userLocation, { lat: b.lat, lng: b.lng }) : Infinity
+        return distA - distB
+      })
+    }
+    return [...list].sort((a, b) => b.created_at.localeCompare(a.created_at))
   }
 
   if (loadingSession) {
@@ -392,6 +582,94 @@ export default function Tasks() {
           </div>
         </form>
 
+        {role === 'organizer' && (
+          <div className="mt-3">
+            <button
+              onClick={() => setBulkOpen((open) => !open)}
+              className="text-sm font-medium text-teal-600 hover:text-teal-700"
+            >
+              {bulkOpen ? '– Mehrere Aufgaben auf einmal schließen' : '+ Mehrere Aufgaben auf einmal anlegen'}
+            </button>
+
+            {bulkOpen && (
+              <form
+                onSubmit={handleBulkCreate}
+                className="mt-2 space-y-2 rounded-xl border border-gray-200 bg-white p-3"
+              >
+                <div className="flex gap-2">
+                  <select
+                    value={bulkAreaId}
+                    onChange={(e) => setBulkAreaId(e.target.value)}
+                    required
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="">Gebiet wählen...</option>
+                    {areas.map((area) => (
+                      <option key={area.id} value={area.id}>
+                        {area.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={bulkCategory}
+                    onChange={(e) => setBulkCategory(e.target.value)}
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {BRAND_SUGGESTIONS[bulkCategory] && (
+                  <div className="flex flex-wrap gap-2">
+                    {BRAND_SUGGESTIONS[bulkCategory].map((brand) => (
+                      <button
+                        key={brand}
+                        type="button"
+                        onClick={() =>
+                          setBulkAddresses((current) => (current ? `${current}\n${brand}, ` : `${brand}, `))
+                        }
+                        className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+                      >
+                        + {brand}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setBulkAddresses((current) => (current ? `${current}\n` : ''))}
+                      className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+                    >
+                      + Sonstiges (frei eintippen)
+                    </button>
+                  </div>
+                )}
+                <textarea
+                  value={bulkAddresses}
+                  onChange={(e) => setBulkAddresses(e.target.value)}
+                  placeholder={'Eine Zeile pro Ort, z.B.\nREWE, Musterstraße 1\nMcFit, Musterstraße 3\nMusterstraße 5 (ohne Name)'}
+                  rows={5}
+                  required
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500">
+                  Format: <span className="font-mono">Name, Adresse</span> oder nur die Adresse. Bei
+                  "Privathaushalt" werden bis zu {MAX_HOUSEHOLDS_PER_BUNDLE} Adressen automatisch zu einer
+                  Aufgabe gebündelt, bei den anderen Kategorien entsteht eine Aufgabe pro Zeile.
+                </p>
+                <button
+                  type="submit"
+                  disabled={bulkSubmitting}
+                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {bulkSubmitting ? 'Adressen werden gesucht...' : 'Aufgaben anlegen'}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
         {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
 
         <details className="mt-5 w-fit">
@@ -421,9 +699,38 @@ export default function Tasks() {
           </div>
         </details>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-gray-500">Sortieren:</span>
+          <button
+            onClick={() => setSortMode('newest')}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'newest' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Neueste
+          </button>
+          <button
+            onClick={() => setSortMode('oldest')}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'oldest' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Älteste
+          </button>
+          <button
+            onClick={handleSortByDistance}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'distance' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Entfernung
+          </button>
+        </div>
+        {locationError && <p className="mt-1 text-xs text-red-600">{locationError}</p>}
+        {sortMode === 'distance' && (
+          <p className="mt-1 text-xs text-gray-500">
+            Aufgaben ohne Adresse/Koordinaten werden ans Ende sortiert.
+          </p>
+        )}
+
         <ul className="mt-4 space-y-3">
-          {tasks
-            .filter((task) => statusFilters.length === 0 || statusFilters.includes(task.status))
+          {sortTasks(
+            tasks.filter((task) => statusFilters.length === 0 || statusFilters.includes(task.status))
+          )
             .map((task) => (
             <li
               key={task.id}
@@ -475,10 +782,18 @@ export default function Tasks() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-medium text-gray-900">{task.title}</p>
-                    {task.area_id && (
-                      <p className="text-xs text-gray-500">
-                        {areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'}
-                      </p>
+                    <p className="text-xs text-gray-500">
+                      {[
+                        task.area_id
+                          ? areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'
+                          : null,
+                        task.category ? CATEGORY_LABELS[task.category] ?? task.category : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                    {task.address_list && (
+                      <p className="mt-0.5 text-xs text-gray-500">{task.address_list}</p>
                     )}
                     {task.address && (
                       <a
@@ -491,12 +806,20 @@ export default function Tasks() {
                       </a>
                     )}
                     {role === 'organizer' && (
-                      <button
-                        onClick={() => setEditingTaskId(task.id)}
-                        className="mt-0.5 block text-xs font-medium text-gray-500 hover:text-teal-600"
-                      >
-                        Bearbeiten
-                      </button>
+                      <div className="mt-0.5 flex gap-3">
+                        <button
+                          onClick={() => setEditingTaskId(task.id)}
+                          className="text-xs font-medium text-gray-500 hover:text-teal-600"
+                        >
+                          Bearbeiten
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTask(task.id)}
+                          className="text-xs font-medium text-gray-500 hover:text-red-600"
+                        >
+                          Löschen
+                        </button>
+                      </div>
                     )}
                   </div>
                   <StatusBadge status={task.status} />
