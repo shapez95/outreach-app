@@ -5,17 +5,12 @@ import Link from 'next/link'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
-type Membership = {
-  role: string
-  organizations: { id: string; name: string } | null
-}
-
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
-  const [memberships, setMemberships] = useState<Membership[]>([])
   const [totalPoints, setTotalPoints] = useState(0)
-  const [inviteCodes, setInviteCodes] = useState<Record<string, string>>({})
+  const [tasksDone, setTasksDone] = useState(0)
+  const [conversationsHeld, setConversationsHeld] = useState(0)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -31,34 +26,20 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (!session) {
-      setMemberships([])
-      return
-    }
-    supabase
-      .from('memberships')
-      .select('role, organizations(id, name)')
-      .eq('profile_id', session.user.id)
-      .then(({ data }) => setMemberships((data as unknown as Membership[]) ?? []))
+    if (!session) return
 
     supabase
       .from('tasks')
-      .select('points')
+      .select('points, conversation_count')
       .eq('assigned_to', session.user.id)
       .eq('status', 'erledigt')
-      .then(({ data }) => setTotalPoints((data ?? []).reduce((sum, t) => sum + t.points, 0)))
+      .then(({ data }) => {
+        const rows = data ?? []
+        setTotalPoints(rows.reduce((sum, t) => sum + t.points, 0))
+        setTasksDone(rows.length)
+        setConversationsHeld(rows.reduce((sum, t) => sum + t.conversation_count, 0))
+      })
   }, [session])
-
-  async function handleLogout() {
-    await supabase.auth.signOut()
-  }
-
-  async function handleShowCode(orgId: string) {
-    const { data, error } = await supabase.rpc('get_invite_code', { target_org_id: orgId })
-    if (!error && data) {
-      setInviteCodes((current) => ({ ...current, [orgId]: data }))
-    }
-  }
 
   if (loadingSession) {
     return (
@@ -79,22 +60,19 @@ export default function Home() {
               <p className="text-sm text-gray-600">
                 Eingeloggt als <span className="font-medium text-gray-900">{session.user.email}</span>
               </p>
-              <p className="text-sm text-gray-600">
-                Deine Punkte: <span className="font-semibold text-emerald-700">{totalPoints}</span>
-              </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/join"
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Organisation beitreten
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Ausloggen
-                </button>
+
+              <div className="rounded-xl bg-teal-50 p-4">
+                <p className="text-xs text-teal-800">
+                  Deine Punkte zeigen deinen persönlichen Fortschritt – kein Ranking, nur du vs. du.
+                </p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-teal-700">{totalPoints}</span>
+                  <span className="text-sm text-teal-800">Punkte</span>
+                </div>
+                <p className="mt-1 text-xs text-teal-800">
+                  {tasksDone} Aufgabe{tasksDone === 1 ? '' : 'n'} erledigt · {conversationsHeld} Gespräch
+                  {conversationsHeld === 1 ? '' : 'e'} geführt
+                </p>
               </div>
             </div>
           ) : (
@@ -103,7 +81,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <Link
                   href="/login"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
                 >
                   Einloggen
                 </Link>
@@ -117,59 +95,6 @@ export default function Home() {
             </div>
           )}
         </div>
-
-        {session && (
-          <>
-            <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Meine Organisationen
-            </h2>
-            <ul className="mt-3 space-y-2">
-              {memberships.map((m) => (
-                <li
-                  key={m.organizations?.id}
-                  className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm"
-                >
-                  <div className="flex items-center justify-between">
-                    <Link
-                      href="/tasks"
-                      onClick={() => m.organizations && localStorage.setItem('currentOrgId', m.organizations.id)}
-                      className="font-medium text-gray-900 hover:text-indigo-600"
-                    >
-                      {m.organizations?.name}
-                    </Link>
-                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-                      {m.role === 'organizer' ? 'Organisator' : 'Helfer'}
-                    </span>
-                  </div>
-                  {m.role === 'organizer' && m.organizations && (
-                    <div className="mt-2">
-                      {inviteCodes[m.organizations.id] ? (
-                        <p className="font-mono text-sm font-semibold tracking-wider text-gray-900">
-                          Code: {inviteCodes[m.organizations.id]}
-                        </p>
-                      ) : (
-                        <button
-                          onClick={() => handleShowCode(m.organizations!.id)}
-                          className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
-                        >
-                          Einladungscode anzeigen
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </li>
-              ))}
-              {memberships.length === 0 && (
-                <li className="text-sm text-gray-500">
-                  Du bist noch keiner Organisation beigetreten.{' '}
-                  <Link href="/join" className="font-medium text-indigo-600 hover:text-indigo-700">
-                    Jetzt beitreten
-                  </Link>
-                </li>
-              )}
-            </ul>
-          </>
-        )}
       </div>
     </main>
   )

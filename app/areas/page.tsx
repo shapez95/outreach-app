@@ -123,7 +123,7 @@ export default function Areas() {
           <p className="text-sm text-gray-600">Du musst eingeloggt sein, um Gebiete zu sehen.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
           >
             Zum Login
           </Link>
@@ -141,7 +141,7 @@ export default function Areas() {
           </p>
           <Link
             href="/join"
-            className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
           >
             Organisation beitreten
           </Link>
@@ -157,7 +157,7 @@ export default function Areas() {
           <h1 className="text-2xl font-bold text-gray-900">
             Gebiete{organization ? ` – ${organization.name}` : ''}
           </h1>
-          <Link href="/tasks" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+          <Link href="/tasks" className="text-sm font-medium text-teal-600 hover:text-teal-700">
             Zu den Aufgaben →
           </Link>
         </div>
@@ -170,11 +170,11 @@ export default function Areas() {
               value={newAreaName}
               onChange={(e) => setNewAreaName(e.target.value)}
               required
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             />
             <button
               type="submit"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
             >
               Anlegen
             </button>

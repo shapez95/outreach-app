@@ -80,6 +80,7 @@ export default function Tasks() {
   const [orgChecked, setOrgChecked] = useState(false)
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null)
   const [statusFilters, setStatusFilters] = useState<string[]>([])
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -185,7 +186,18 @@ export default function Tasks() {
   async function updateTask(
     taskId: string,
     changes: Partial<
-      Pick<Task, 'status' | 'assigned_to' | 'proof_path' | 'comment' | 'conversation_count' | 'points' | 'area_id'>
+      Pick<
+        Task,
+        | 'status'
+        | 'assigned_to'
+        | 'proof_path'
+        | 'comment'
+        | 'conversation_count'
+        | 'points'
+        | 'area_id'
+        | 'title'
+        | 'address'
+      >
     >
   ) {
     const { error } = await supabase.from('tasks').update(changes).eq('id', taskId)
@@ -209,6 +221,21 @@ export default function Tasks() {
     } else {
       loadTasks()
     }
+  }
+
+  async function handleSaveEdit(e: React.FormEvent<HTMLFormElement>, taskId: string) {
+    e.preventDefault()
+    const form = e.currentTarget
+    const title = (form.elements.namedItem('edit_title') as HTMLInputElement).value
+    const address = (form.elements.namedItem('edit_address') as HTMLInputElement).value
+    const areaId = (form.elements.namedItem('edit_area') as HTMLSelectElement).value
+
+    await updateTask(taskId, {
+      title,
+      address: address || null,
+      area_id: areaId || null,
+    })
+    setEditingTaskId(null)
   }
 
   function handleClaim(taskId: string) {
@@ -280,7 +307,7 @@ export default function Tasks() {
           <p className="text-sm text-gray-600">Du musst eingeloggt sein, um Aufgaben zu sehen.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
           >
             Zum Login
           </Link>
@@ -298,7 +325,7 @@ export default function Tasks() {
           </p>
           <Link
             href="/join"
-            className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
           >
             Organisation beitreten
           </Link>
@@ -315,10 +342,10 @@ export default function Tasks() {
             Aufgaben{organization ? ` – ${organization.name}` : ''}
           </h1>
           <div className="flex items-center gap-3">
-            <Link href="/areas" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+            <Link href="/areas" className="text-sm font-medium text-teal-600 hover:text-teal-700">
               Gebiete
             </Link>
-            <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+            <Link href="/" className="text-sm font-medium text-teal-600 hover:text-teal-700">
               ← Zurück
             </Link>
           </div>
@@ -333,11 +360,11 @@ export default function Tasks() {
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               required
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             />
             <button
               type="submit"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
             >
               Anlegen
             </button>
@@ -346,7 +373,7 @@ export default function Tasks() {
             <select
               value={newAreaId}
               onChange={(e) => setNewAreaId(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             >
               <option value="">Kein Gebiet</option>
               {areas.map((area) => (
@@ -360,7 +387,7 @@ export default function Tasks() {
               placeholder="Adresse (optional)"
               value={newAddress}
               onChange={(e) => setNewAddress(e.target.value)}
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             />
           </div>
         </form>
@@ -386,7 +413,7 @@ export default function Tasks() {
             {statusFilters.length > 0 && (
               <button
                 onClick={() => setStatusFilters([])}
-                className="mt-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                className="mt-1 text-xs font-medium text-teal-600 hover:text-teal-700"
               >
                 Filter zurücksetzen
               </button>
@@ -402,27 +429,79 @@ export default function Tasks() {
               key={task.id}
               className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium text-gray-900">{task.title}</p>
-                  {task.area_id && (
-                    <p className="text-xs text-gray-500">
-                      {areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'}
-                    </p>
-                  )}
-                  {task.address && (
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.address)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-0.5 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-700"
+              {editingTaskId === task.id ? (
+                <form onSubmit={(e) => handleSaveEdit(e, task.id)} className="space-y-2">
+                  <input
+                    name="edit_title"
+                    defaultValue={task.title}
+                    required
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  />
+                  <input
+                    name="edit_address"
+                    defaultValue={task.address ?? ''}
+                    placeholder="Adresse (optional)"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  />
+                  <select
+                    name="edit_area"
+                    defaultValue={task.area_id ?? ''}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="">Kein Gebiet</option>
+                    {areas.map((area) => (
+                      <option key={area.id} value={area.id}>
+                        {area.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
                     >
-                      📍 {task.address} – Route öffnen
-                    </a>
-                  )}
+                      Speichern
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTaskId(null)}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Abbrechen
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-900">{task.title}</p>
+                    {task.area_id && (
+                      <p className="text-xs text-gray-500">
+                        {areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'}
+                      </p>
+                    )}
+                    {task.address && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.address)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-0.5 inline-block text-xs font-medium text-teal-600 hover:text-teal-700"
+                      >
+                        📍 {task.address} – Route öffnen
+                      </a>
+                    )}
+                    {role === 'organizer' && (
+                      <button
+                        onClick={() => setEditingTaskId(task.id)}
+                        className="mt-0.5 block text-xs font-medium text-gray-500 hover:text-teal-600"
+                      >
+                        Bearbeiten
+                      </button>
+                    )}
+                  </div>
+                  <StatusBadge status={task.status} />
                 </div>
-                <StatusBadge status={task.status} />
-              </div>
+              )}
 
               {role === 'organizer' && task.assigned_to && assigneeEmails[task.assigned_to] && (
                 <p className="mt-1 text-xs text-gray-500">
@@ -454,7 +533,7 @@ export default function Tasks() {
               {task.status === 'offen' && (
                 <button
                   onClick={() => handleClaim(task.id)}
-                  className="mt-3 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                  className="mt-3 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
                 >
                   Aufgabe übernehmen
                 </button>
@@ -476,7 +555,7 @@ export default function Tasks() {
                     name="comment"
                     placeholder="Kommentar (optional), z.B. was ist passiert?"
                     rows={2}
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                   />
                   <div>
                     <label className="block text-xs font-medium text-gray-600">
@@ -487,7 +566,7 @@ export default function Tasks() {
                       name="conversation_count"
                       min={0}
                       defaultValue={0}
-                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                     />
                   </div>
                   <button
