@@ -187,7 +187,7 @@ export default function Areas() {
   }
 
   async function handleDeleteArea(areaId: string) {
-    if (!window.confirm('Gebiet wirklich löschen? Aufgaben mit diesem Gebiet bleiben erhalten, verlieren aber die Gebietszuordnung.')) {
+    if (!window.confirm('Gebiet wirklich löschen? Alle Aufgaben dieses Gebiets werden dabei ebenfalls gelöscht.')) {
       return
     }
 

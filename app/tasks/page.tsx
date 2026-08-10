@@ -6,6 +6,7 @@ import type { Session } from '@supabase/supabase-js'
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
 import { point } from '@turf/helpers'
 import type { Feature, Geometry } from 'geojson'
+import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 
 type Task = {
@@ -103,6 +104,10 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
   return 2 * R * Math.asin(Math.sqrt(h))
 }
 
+function normalizeAddress(address: string): string {
+  return address.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
 function isWithinArea(area: Area, lat: number, lng: number): boolean {
   if (!area.boundary) return true
   const geometry = area.boundary as Geometry
@@ -137,6 +142,8 @@ export default function Tasks() {
   const [bulkAddresses, setBulkAddresses] = useState('')
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
+  const [excelSubmitting, setExcelSubmitting] = useState(false)
+  const [excelProgress, setExcelProgress] = useState('')
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
   const [filterAreaId, setFilterAreaId] = useState<string | null>(null)
@@ -238,6 +245,11 @@ export default function Tasks() {
     e.preventDefault()
     if (!organization) return
 
+    if (newAddress && tasks.some((t) => t.address && normalizeAddress(t.address) === normalizeAddress(newAddress))) {
+      setMessage(`Fehler: Es gibt bereits eine Aufgabe mit der Adresse "${newAddress}".`)
+      return
+    }
+
     let coords: { lat: number; lng: number } | null = null
     const selectedArea = areas.find((a) => a.id === newAreaId)
 
@@ -293,6 +305,19 @@ export default function Tasks() {
         return { name, address }
       })
     if (entries.length === 0) return
+
+    const existingAddresses = new Set(
+      tasks.filter((t) => t.address).map((t) => normalizeAddress(t.address as string))
+    )
+    const seenInThisBatch = new Set<string>()
+    for (const entry of entries) {
+      const normalized = normalizeAddress(entry.address)
+      if (existingAddresses.has(normalized) || seenInThisBatch.has(normalized)) {
+        setMessage(`Fehler: Adresse "${entry.address}" gibt es schon (doppelt). Keine der Aufgaben wurde angelegt.`)
+        return
+      }
+      seenInThisBatch.add(normalized)
+    }
 
     if (bulkCategory !== 'privathaushalt' && entries.some((e) => !e.name)) {
       setMessage(
@@ -377,6 +402,119 @@ export default function Tasks() {
       setBulkOpen(false)
       loadTasks()
     }
+  }
+
+  async function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !organization) return
+
+    setExcelSubmitting(true)
+    setMessage('')
+    setExcelProgress('Datei wird gelesen...')
+
+    const buffer = await file.arrayBuffer()
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+    function findValue(row: Record<string, string>, keys: string[]): string {
+      for (const key of Object.keys(row)) {
+        if (keys.includes(key.trim().toLowerCase())) return String(row[key]).trim()
+      }
+      return ''
+    }
+
+    const rowsToInsert: {
+      org_id: string
+      title: string
+      address: string
+      area_id: string
+      category: string
+      status: string
+      lat: number | null
+      lng: number | null
+    }[] = []
+    const skipped: string[] = []
+    const existingAddresses = new Set(
+      tasks.filter((t) => t.address).map((t) => normalizeAddress(t.address as string))
+    )
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      const rowLabel = `Zeile ${i + 2}`
+      const name = findValue(row, ['name'])
+      const address = findValue(row, ['adresse', 'address'])
+      const areaName = findValue(row, ['gebiet', 'bezirk', 'stadtteil'])
+      const categoryRaw = findValue(row, ['kategorie', 'category']).toLowerCase()
+
+      if (!name || !address || !areaName) {
+        skipped.push(`${rowLabel}: Name, Adresse oder Gebiet fehlt`)
+        continue
+      }
+
+      const matchedArea = areas.find((a) => a.name.toLowerCase() === areaName.toLowerCase())
+      if (!matchedArea) {
+        skipped.push(`${rowLabel}: Gebiet "${areaName}" existiert nicht`)
+        continue
+      }
+
+      const normalizedAddress = normalizeAddress(address)
+      if (
+        existingAddresses.has(normalizedAddress) ||
+        rowsToInsert.some((r) => normalizeAddress(r.address) === normalizedAddress)
+      ) {
+        skipped.push(`${rowLabel}: Adresse "${address}" gibt es schon (doppelt)`)
+        continue
+      }
+
+      const matchedCategory =
+        Object.entries(CATEGORY_LABELS).find(
+          ([key, label]) => key === categoryRaw || label.toLowerCase() === categoryRaw
+        )?.[0] ?? 'sonstiges'
+
+      setExcelProgress(`${rowLabel} von ${rows.length}: Adresse wird gesucht...`)
+      const coords = await geocodeAddress(address)
+      await sleep(1100)
+
+      if (!coords) {
+        skipped.push(`${rowLabel}: Adresse "${address}" nicht gefunden`)
+        continue
+      }
+      if (matchedArea.boundary && !isWithinArea(matchedArea, coords.lat, coords.lng)) {
+        skipped.push(`${rowLabel}: "${address}" liegt außerhalb von "${matchedArea.name}"`)
+        continue
+      }
+
+      rowsToInsert.push({
+        org_id: organization.id,
+        title: name,
+        address,
+        area_id: matchedArea.id,
+        category: matchedCategory,
+        status: role === 'organizer' ? 'offen' : 'vorschlag',
+        lat: coords.lat,
+        lng: coords.lng,
+      })
+    }
+
+    setExcelProgress('')
+
+    if (rowsToInsert.length > 0) {
+      const { error } = await supabase.from('tasks').insert(rowsToInsert)
+      if (error) {
+        setMessage('Fehler: ' + error.message)
+        setExcelSubmitting(false)
+        return
+      }
+    }
+
+    setMessage(
+      `${rowsToInsert.length} Aufgabe${rowsToInsert.length === 1 ? '' : 'n'} angelegt.` +
+        (skipped.length > 0 ? ` ${skipped.length} übersprungen: ${skipped.join('; ')}` : '')
+    )
+    setExcelSubmitting(false)
+    loadTasks()
   }
 
   async function updateTask(
@@ -617,6 +755,20 @@ export default function Tasks() {
           </button>
         )}
 
+        {areas.length === 0 ? (
+          <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+            Es gibt noch kein Gebiet für diese Organisation. Aufgaben können erst angelegt werden, wenn
+            mindestens ein Gebiet existiert.{' '}
+            {role === 'organizer' ? (
+              <Link href="/areas" className="font-medium text-teal-600 hover:text-teal-700">
+                Jetzt Gebiet anlegen
+              </Link>
+            ) : (
+              'Frag deinen Organisator.'
+            )}
+          </div>
+        ) : (
+          <>
         <form onSubmit={handleAddTask} className="mt-5 space-y-2">
           <div className="flex gap-2">
             <input
@@ -638,9 +790,12 @@ export default function Tasks() {
             <select
               value={newAreaId}
               onChange={(e) => setNewAreaId(e.target.value)}
+              required
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             >
-              <option value="">Kein Gebiet</option>
+              <option value="" disabled>
+                Gebiet wählen...
+              </option>
               {areas.map((area) => (
                 <option key={area.id} value={area.id}>
                   {area.name}
@@ -656,6 +811,27 @@ export default function Tasks() {
             />
           </div>
         </form>
+
+        {role === 'organizer' && (
+          <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
+            <p className="text-sm font-medium text-gray-700">Excel-Import</p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Datei mit Spalten <span className="font-mono">Name</span>,{' '}
+              <span className="font-mono">Adresse</span>, <span className="font-mono">Gebiet</span> (optional{' '}
+              <span className="font-mono">Kategorie</span>). Das Gebiet muss vorher schon existieren.
+            </p>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleExcelUpload}
+              disabled={excelSubmitting}
+              className="mt-2 block w-full text-sm text-gray-600"
+            />
+            {excelSubmitting && (
+              <p className="mt-1 text-xs text-gray-500">{excelProgress || 'Wird verarbeitet...'}</p>
+            )}
+          </div>
+        )}
 
         {role === 'organizer' && (
           <div className="mt-3">
@@ -743,6 +919,8 @@ export default function Tasks() {
               </form>
             )}
           </div>
+        )}
+          </>
         )}
 
         {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
@@ -832,9 +1010,12 @@ export default function Tasks() {
                   <select
                     name="edit_area"
                     defaultValue={task.area_id ?? ''}
+                    required
                     className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                   >
-                    <option value="">Kein Gebiet</option>
+                    <option value="" disabled>
+                      Gebiet wählen...
+                    </option>
                     {areas.map((area) => (
                       <option key={area.id} value={area.id}>
                         {area.name}
