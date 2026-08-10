@@ -16,6 +16,7 @@ type Task = {
   conversation_count: number
   area_id: string | null
   points: number
+  address: string | null
   created_at: string
 }
 
@@ -69,6 +70,7 @@ export default function Tasks() {
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [assigneeEmails, setAssigneeEmails] = useState<Record<string, string>>({})
   const [newTitle, setNewTitle] = useState('')
+  const [newAddress, setNewAddress] = useState('')
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null)
@@ -157,6 +159,7 @@ export default function Tasks() {
         org_id: organization.id,
         title: newTitle,
         area_id: newAreaId || null,
+        address: newAddress || null,
         status: role === 'organizer' ? 'offen' : 'vorschlag',
       })
 
@@ -165,6 +168,7 @@ export default function Tasks() {
     } else {
       setNewTitle('')
       setNewAreaId('')
+      setNewAddress('')
       loadTasks()
     }
   }
@@ -328,18 +332,27 @@ export default function Tasks() {
               Anlegen
             </button>
           </div>
-          <select
-            value={newAreaId}
-            onChange={(e) => setNewAreaId(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="">Kein Gebiet</option>
-            {areas.map((area) => (
-              <option key={area.id} value={area.id}>
-                {area.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex gap-2">
+            <select
+              value={newAreaId}
+              onChange={(e) => setNewAreaId(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+              <option value="">Kein Gebiet</option>
+              {areas.map((area) => (
+                <option key={area.id} value={area.id}>
+                  {area.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Adresse (optional)"
+              value={newAddress}
+              onChange={(e) => setNewAddress(e.target.value)}
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
         </form>
 
         {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
@@ -386,6 +399,16 @@ export default function Tasks() {
                     <p className="text-xs text-gray-500">
                       {areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'}
                     </p>
+                  )}
+                  {task.address && (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.address)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-0.5 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                    >
+                      📍 {task.address} – Route öffnen
+                    </a>
                   )}
                 </div>
                 <StatusBadge status={task.status} />
