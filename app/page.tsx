@@ -14,6 +14,7 @@ export default function Home() {
   const [session, setSession] = useState<Session | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
   const [memberships, setMemberships] = useState<Membership[]>([])
+  const [totalPoints, setTotalPoints] = useState(0)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -38,6 +39,13 @@ export default function Home() {
       .select('role, organizations(id, name)')
       .eq('profile_id', session.user.id)
       .then(({ data }) => setMemberships((data as unknown as Membership[]) ?? []))
+
+    supabase
+      .from('tasks')
+      .select('points')
+      .eq('assigned_to', session.user.id)
+      .eq('status', 'erledigt')
+      .then(({ data }) => setTotalPoints((data ?? []).reduce((sum, t) => sum + t.points, 0)))
   }, [session])
 
   async function handleLogout() {
@@ -62,6 +70,9 @@ export default function Home() {
             <div className="space-y-3">
               <p className="text-sm text-gray-600">
                 Eingeloggt als <span className="font-medium text-gray-900">{session.user.email}</span>
+              </p>
+              <p className="text-sm text-gray-600">
+                Deine Punkte: <span className="font-semibold text-emerald-700">{totalPoints}</span>
               </p>
               <div className="flex flex-wrap items-center gap-3">
                 <Link

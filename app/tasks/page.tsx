@@ -15,8 +15,12 @@ type Task = {
   comment: string | null
   conversation_count: number
   area_id: string | null
+  points: number
   created_at: string
 }
+
+const POINTS_PER_TASK = 10
+const POINTS_PER_CONVERSATION = 5
 
 type Organization = {
   id: string
@@ -167,7 +171,9 @@ export default function Tasks() {
 
   async function updateTask(
     taskId: string,
-    changes: Partial<Pick<Task, 'status' | 'assigned_to' | 'proof_path' | 'comment' | 'conversation_count'>>
+    changes: Partial<
+      Pick<Task, 'status' | 'assigned_to' | 'proof_path' | 'comment' | 'conversation_count' | 'points' | 'area_id'>
+    >
   ) {
     const { error } = await supabase.from('tasks').update(changes).eq('id', taskId)
 
@@ -231,8 +237,9 @@ export default function Tasks() {
     setUploadingTaskId(null)
   }
 
-  function handleConfirm(taskId: string) {
-    updateTask(taskId, { status: 'erledigt' })
+  function handleConfirm(task: Task) {
+    const points = POINTS_PER_TASK + task.conversation_count * POINTS_PER_CONVERSATION
+    updateTask(task.id, { status: 'erledigt', points })
   }
 
   function handleReject(taskId: string) {
@@ -477,6 +484,9 @@ export default function Tasks() {
                   <p className="text-sm text-gray-600">
                     Geführte Gespräche: <span className="font-medium">{task.conversation_count}</span>
                   </p>
+                  {task.status === 'erledigt' && (
+                    <p className="text-sm font-medium text-emerald-700">+{task.points} Punkte</p>
+                  )}
                   {task.comment && (
                     <p className="rounded-lg bg-gray-50 p-2 text-sm text-gray-700">{task.comment}</p>
                   )}
@@ -486,7 +496,7 @@ export default function Tasks() {
               {task.status === 'zur_pruefung' && role === 'organizer' && (
                 <div className="mt-3 flex gap-2">
                   <button
-                    onClick={() => handleConfirm(task.id)}
+                    onClick={() => handleConfirm(task)}
                     className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
                   >
                     Bestätigen
