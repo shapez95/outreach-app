@@ -440,22 +440,17 @@ export default function Tasks() {
       tasks.filter((t) => t.address).map((t) => normalizeAddress(t.address as string))
     )
 
+    const areasWithBoundary = areas.filter((a) => a.boundary)
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
       const rowLabel = `Zeile ${i + 2}`
       const name = findValue(row, ['name'])
       const address = findValue(row, ['adresse', 'address'])
-      const areaName = findValue(row, ['gebiet', 'bezirk', 'stadtteil'])
       const categoryRaw = findValue(row, ['kategorie', 'category']).toLowerCase()
 
-      if (!name || !address || !areaName) {
-        skipped.push(`${rowLabel}: Name, Adresse oder Gebiet fehlt`)
-        continue
-      }
-
-      const matchedArea = areas.find((a) => a.name.toLowerCase() === areaName.toLowerCase())
-      if (!matchedArea) {
-        skipped.push(`${rowLabel}: Gebiet "${areaName}" existiert nicht`)
+      if (!name || !address) {
+        skipped.push(`${rowLabel}: Name oder Adresse fehlt`)
         continue
       }
 
@@ -481,8 +476,10 @@ export default function Tasks() {
         skipped.push(`${rowLabel}: Adresse "${address}" nicht gefunden`)
         continue
       }
-      if (matchedArea.boundary && !isWithinArea(matchedArea, coords.lat, coords.lng)) {
-        skipped.push(`${rowLabel}: "${address}" liegt außerhalb von "${matchedArea.name}"`)
+
+      const matchedArea = areasWithBoundary.find((a) => isWithinArea(a, coords.lat, coords.lng))
+      if (!matchedArea) {
+        skipped.push(`${rowLabel}: "${address}" liegt in keinem eurer Gebiete`)
         continue
       }
 
@@ -816,9 +813,10 @@ export default function Tasks() {
           <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
             <p className="text-sm font-medium text-gray-700">Excel-Import</p>
             <p className="mt-0.5 text-xs text-gray-500">
-              Datei mit Spalten <span className="font-mono">Name</span>,{' '}
-              <span className="font-mono">Adresse</span>, <span className="font-mono">Gebiet</span> (optional{' '}
-              <span className="font-mono">Kategorie</span>). Das Gebiet muss vorher schon existieren.
+              Datei mit Spalten <span className="font-mono">Name</span> und{' '}
+              <span className="font-mono">Adresse</span> (optional <span className="font-mono">Kategorie</span>).
+              Das Gebiet wird automatisch anhand der Adresse erkannt – dafür müssen eure Gebiete schon
+              angelegt sein.
             </p>
             <input
               type="file"
