@@ -112,6 +112,30 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
   return 2 * R * Math.asin(Math.sqrt(h))
 }
 
+function orderByNearestNeighbor<T extends { lat: number; lng: number }>(
+  start: { lat: number; lng: number },
+  points: T[]
+): T[] {
+  const remaining = [...points]
+  const ordered: T[] = []
+  let current = start
+  while (remaining.length > 0) {
+    let nearestIndex = 0
+    let nearestDist = Infinity
+    remaining.forEach((p, i) => {
+      const d = distanceKm(current, p)
+      if (d < nearestDist) {
+        nearestDist = d
+        nearestIndex = i
+      }
+    })
+    const [next] = remaining.splice(nearestIndex, 1)
+    ordered.push(next)
+    current = next
+  }
+  return ordered
+}
+
 function normalizeAddress(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, ' ')
 }
@@ -165,6 +189,15 @@ export default function Tasks() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [locationError, setLocationError] = useState('')
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [routeMode, setRouteMode] = useState(false)
+  const [selectedForRoute, setSelectedForRoute] = useState<Set<string>>(new Set())
+  const [routeError, setRouteError] = useState('')
+  const [routeStart, setRouteStart] = useState('current')
+  const [routeEnd, setRouteEnd] = useState('auto')
+  const [routeTravelMode, setRouteTravelMode] = useState<'driving' | 'walking' | 'bicycling' | 'transit'>(
+    'driving'
+  )
+  const [routeLegs, setRouteLegs] = useState<{ label: string; url: string }[]>([])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -733,6 +766,101 @@ export default function Tasks() {
     )
   }
 
+  function toggleTaskForRoute(taskId: string) {
+    setSelectedForRoute((current) => {
+      const next = new Set(current)
+      if (next.has(taskId)) {
+        next.delete(taskId)
+      } else {
+        next.add(taskId)
+      }
+      return next
+    })
+  }
+
+  function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
+    if (userLocation) return Promise.resolve(userLocation)
+    if (!navigator.geolocation) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const loc = { lat: position.coords.latitude, lng: position.coords.longitude }
+          setUserLocation(loc)
+          resolve(loc)
+        },
+        () => resolve(null)
+      )
+    })
+  }
+
+  async function handleOpenRoute() {
+    setRouteError('')
+    setRouteLegs([])
+    const selectedTasks = tasks.filter(
+      (t) => selectedForRoute.has(t.id) && t.lat != null && t.lng != null
+    ) as (Task & { lat: number; lng: number })[]
+
+    if (selectedTasks.length === 0) {
+      setRouteError('Bitte mindestens eine Aufgabe mit Adresse auswählen.')
+      return
+    }
+
+    const startTask = routeStart !== 'current' ? selectedTasks.find((t) => t.id === routeStart) : null
+    const endTask =
+      routeEnd !== 'current' && routeEnd !== 'auto' ? selectedTasks.find((t) => t.id === routeEnd) : null
+
+    let startPoint: { lat: number; lng: number; label: string } | null = startTask
+      ? { lat: startTask.lat, lng: startTask.lng, label: startTask.title }
+      : null
+    if (!startPoint) {
+      const loc = await getCurrentLocation()
+      if (!loc) {
+        setRouteError('Standort konnte nicht ermittelt werden. Bitte Standortfreigabe erlauben oder eine Aufgabe als Start wählen.')
+        return
+      }
+      startPoint = { ...loc, label: 'Mein Standort' }
+    }
+
+    let endPoint: { lat: number; lng: number; label: string } | null = endTask
+      ? { lat: endTask.lat, lng: endTask.lng, label: endTask.title }
+      : null
+    if (!endPoint && routeEnd === 'current') {
+      const loc = await getCurrentLocation()
+      if (!loc) {
+        setRouteError('Standort für das Ziel konnte nicht ermittelt werden.')
+        return
+      }
+      endPoint = { ...loc, label: 'Mein Standort' }
+    }
+
+    const middlePoints = selectedTasks
+      .filter((t) => t.id !== startTask?.id && t.id !== endTask?.id)
+      .map((t) => ({ lat: t.lat, lng: t.lng, label: t.title }))
+    const ordered = orderByNearestNeighbor(startPoint, middlePoints)
+
+    let stops: { lat: number; lng: number; label: string }[]
+    if (endPoint) {
+      stops = [startPoint, ...ordered, endPoint]
+    } else {
+      if (ordered.length === 0) {
+        setRouteError('Bitte mindestens ein weiteres Ziel auswählen oder ein Ziel festlegen.')
+        return
+      }
+      stops = [startPoint, ...ordered]
+    }
+
+    const legs = []
+    for (let i = 0; i < stops.length - 1; i++) {
+      const from = stops[i]
+      const to = stops[i + 1]
+      const url =
+        `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}` +
+        `&travelmode=${routeTravelMode}`
+      legs.push({ label: `${i + 1}. ${from.label} → ${to.label}`, url })
+    }
+    setRouteLegs(legs)
+  }
+
   function sortTasks(list: Task[]) {
     if (sortMode === 'oldest') {
       return [...list].sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -1071,6 +1199,108 @@ export default function Tasks() {
           </p>
         )}
 
+        <div className="mt-3">
+          <button
+            onClick={() => {
+              setRouteMode((v) => !v)
+              setSelectedForRoute(new Set())
+              setRouteError('')
+            }}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${routeMode ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            {routeMode ? '✕ Routenplanung beenden' : '🧭 Route für mehrere Aufgaben planen'}
+          </button>
+
+          {routeMode && (
+            <div className="mt-2 space-y-2 rounded-xl border border-gray-200 bg-white p-3">
+              <span className="text-xs text-gray-500">
+                Wähl unten Aufgaben mit Häkchen aus ({selectedForRoute.size} ausgewählt).
+              </span>
+
+              <div className="flex flex-wrap gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600">Start</label>
+                  <select
+                    value={routeStart}
+                    onChange={(e) => setRouteStart(e.target.value)}
+                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="current">Mein aktueller Standort</option>
+                    {tasks
+                      .filter((t) => selectedForRoute.has(t.id))
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.title}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600">Ziel</label>
+                  <select
+                    value={routeEnd}
+                    onChange={(e) => setRouteEnd(e.target.value)}
+                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="auto">Automatisch (letzter Stopp)</option>
+                    <option value="current">Mein aktueller Standort</option>
+                    {tasks
+                      .filter((t) => selectedForRoute.has(t.id))
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.title}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600">Verkehrsmittel</label>
+                  <select
+                    value={routeTravelMode}
+                    onChange={(e) => setRouteTravelMode(e.target.value as typeof routeTravelMode)}
+                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    <option value="driving">Auto</option>
+                    <option value="walking">Zu Fuß</option>
+                    <option value="bicycling">Fahrrad</option>
+                    <option value="transit">Öffentliche Verkehrsmittel</option>
+                  </select>
+                </div>
+              </div>
+
+              <button
+                onClick={handleOpenRoute}
+                disabled={selectedForRoute.size === 0}
+                className="rounded-lg bg-teal-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+              >
+                Route berechnen
+              </button>
+
+              {routeLegs.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs text-gray-500">
+                    Tipp dich während der Tour Etappe für Etappe durch:
+                  </p>
+                  {routeLegs.map((leg, i) => (
+                    <a
+                      key={i}
+                      href={leg.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-lg border border-gray-200 px-3 py-2 text-sm text-teal-700 hover:bg-gray-50"
+                    >
+                      {leg.label}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {routeError && <p className="mt-1 text-xs text-red-600">{routeError}</p>}
+        </div>
+
         <ul className="mt-4 space-y-3">
           {sortTasks(
             tasks.filter(
@@ -1131,7 +1361,16 @@ export default function Tasks() {
                 </form>
               ) : (
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex items-start gap-2">
+                    {routeMode && task.lat != null && task.lng != null && (
+                      <input
+                        type="checkbox"
+                        checked={selectedForRoute.has(task.id)}
+                        onChange={() => toggleTaskForRoute(task.id)}
+                        className="mt-1 rounded border-gray-300"
+                      />
+                    )}
+                    <div>
                     <p className="font-medium text-gray-900">{task.title}</p>
                     <p className="text-xs text-gray-500">
                       {[
@@ -1172,6 +1411,7 @@ export default function Tasks() {
                         </button>
                       </div>
                     )}
+                    </div>
                   </div>
                   <StatusBadge status={task.status} />
                 </div>
