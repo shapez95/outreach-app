@@ -18,6 +18,8 @@ type Task = {
   proof_path: string | null
   comment: string | null
   conversation_count: number
+  flyer_count: number
+  contact_name: string | null
   area_id: string | null
   points: number
   address: string | null
@@ -59,6 +61,12 @@ type Area = {
   id: string
   name: string
   boundary: Feature<Geometry> | Geometry | null
+}
+
+type OrgMember = {
+  profile_id: string
+  email: string
+  role: string
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -135,7 +143,6 @@ export default function Tasks() {
   const [newAreaId, setNewAreaId] = useState('')
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [assigneeEmails, setAssigneeEmails] = useState<Record<string, string>>({})
-  const [newTitle, setNewTitle] = useState('')
   const [newAddress, setNewAddress] = useState('')
   const [bulkAreaId, setBulkAreaId] = useState('')
   const [bulkCategory, setBulkCategory] = useState('privathaushalt')
@@ -144,6 +151,11 @@ export default function Tasks() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [excelSubmitting, setExcelSubmitting] = useState(false)
   const [excelProgress, setExcelProgress] = useState('')
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+  const [flyersReceived, setFlyersReceived] = useState(0)
+  const [flyersPlaced, setFlyersPlaced] = useState(0)
+  const [issueMemberId, setIssueMemberId] = useState('')
+  const [issueAmount, setIssueAmount] = useState('')
   const [message, setMessage] = useState('')
   const [orgChecked, setOrgChecked] = useState(false)
   const [filterAreaId, setFilterAreaId] = useState<string | null>(null)
@@ -224,6 +236,30 @@ export default function Tasks() {
           Object.fromEntries((profiles ?? []).map((p) => [p.id, p.email as string]))
         )
       }
+
+      const { data: issuances } = await supabase
+        .from('flyer_issuances')
+        .select('amount')
+        .eq('org_id', org.id)
+        .eq('profile_id', session.session.user.id)
+      setFlyersReceived((issuances ?? []).reduce((sum, i) => sum + i.amount, 0))
+      setFlyersPlaced(
+        loadedTasks
+          .filter((t) => t.assigned_to === session.session!.user.id)
+          .reduce((sum, t) => sum + t.flyer_count, 0)
+      )
+
+      if (membership?.role === 'organizer') {
+        const { data: memberData } = await supabase
+          .from('memberships')
+          .select('profile_id, role, profiles(email)')
+          .eq('org_id', org.id)
+        setOrgMembers(
+          ((memberData ?? []) as unknown as { profile_id: string; role: string; profiles: { email: string } | null }[]).map(
+            (m) => ({ profile_id: m.profile_id, role: m.role, email: m.profiles?.email ?? '' })
+          )
+        )
+      }
     }
   }
 
@@ -241,30 +277,46 @@ export default function Tasks() {
     setFilterAreaId(null)
   }
 
+  async function handleIssueFlyers(e: React.FormEvent) {
+    e.preventDefault()
+    if (!organization || !issueMemberId || !issueAmount) return
+
+    const { error } = await supabase.from('flyer_issuances').insert({
+      org_id: organization.id,
+      profile_id: issueMemberId,
+      amount: Number(issueAmount),
+      issued_by: session?.user.id,
+    })
+
+    if (error) {
+      setMessage('Fehler: ' + error.message)
+    } else {
+      setIssueMemberId('')
+      setIssueAmount('')
+      loadTasks()
+    }
+  }
+
   async function handleAddTask(e: React.FormEvent) {
     e.preventDefault()
     if (!organization) return
 
-    if (newAddress && tasks.some((t) => t.address && normalizeAddress(t.address) === normalizeAddress(newAddress))) {
+    if (tasks.some((t) => t.address && normalizeAddress(t.address) === normalizeAddress(newAddress))) {
       setMessage(`Fehler: Es gibt bereits eine Aufgabe mit der Adresse "${newAddress}".`)
       return
     }
 
-    let coords: { lat: number; lng: number } | null = null
     const selectedArea = areas.find((a) => a.id === newAreaId)
+    const coords = await geocodeAddress(newAddress)
 
-    if (newAddress) {
-      coords = await geocodeAddress(newAddress)
-
-      if (selectedArea?.boundary) {
-        if (!coords) {
-          setMessage(`Fehler: Adresse "${newAddress}" konnte nicht gefunden werden. Bitte prüfen.`)
-          return
-        }
-        if (!isWithinArea(selectedArea, coords.lat, coords.lng)) {
-          setMessage(`Fehler: Die Adresse liegt außerhalb des Gebiets "${selectedArea.name}".`)
-          return
-        }
+    if (selectedArea?.boundary) {
+      if (!coords) {
+        setMessage(`Fehler: Adresse "${newAddress}" konnte nicht gefunden werden. Bitte prüfen.`)
+        return
+      }
+      if (!isWithinArea(selectedArea, coords.lat, coords.lng)) {
+        setMessage(`Fehler: Die Adresse liegt außerhalb des Gebiets "${selectedArea.name}".`)
+        return
       }
     }
 
@@ -272,9 +324,9 @@ export default function Tasks() {
       .from('tasks')
       .insert({
         org_id: organization.id,
-        title: newTitle,
+        title: newAddress,
         area_id: newAreaId || null,
-        address: newAddress || null,
+        address: newAddress,
         lat: coords?.lat ?? null,
         lng: coords?.lng ?? null,
         status: role === 'organizer' ? 'offen' : 'vorschlag',
@@ -283,7 +335,6 @@ export default function Tasks() {
     if (error) {
       setMessage('Fehler: ' + error.message)
     } else {
-      setNewTitle('')
       setNewAreaId('')
       setNewAddress('')
       loadTasks()
@@ -524,6 +575,8 @@ export default function Tasks() {
         | 'proof_path'
         | 'comment'
         | 'conversation_count'
+        | 'flyer_count'
+        | 'contact_name'
         | 'points'
         | 'area_id'
         | 'title'
@@ -613,8 +666,17 @@ export default function Tasks() {
     const fileInput = form.elements.namedItem('photo') as HTMLInputElement
     const commentInput = form.elements.namedItem('comment') as HTMLTextAreaElement
     const conversationInput = form.elements.namedItem('conversation_count') as HTMLInputElement
+    const flyerInput = form.elements.namedItem('flyer_count') as HTMLInputElement
+    const contactInput = form.elements.namedItem('contact_name') as HTMLInputElement
     const file = fileInput.files?.[0]
     if (!file) return
+
+    const flyerCount = Number(flyerInput.value) || 0
+    const flyersRemaining = flyersReceived - flyersPlaced
+    if (flyerCount > flyersRemaining) {
+      setMessage(`Fehler: Du hast nur noch ${flyersRemaining} Flyer übrig.`)
+      return
+    }
 
     setUploadingTaskId(task.id)
     setMessage('')
@@ -635,6 +697,8 @@ export default function Tasks() {
       proof_path: path,
       comment: commentInput.value || null,
       conversation_count: Number(conversationInput.value) || 0,
+      flyer_count: flyerCount,
+      contact_name: contactInput.value || null,
     })
     setUploadingTaskId(null)
   }
@@ -752,6 +816,44 @@ export default function Tasks() {
           </button>
         )}
 
+        <div className="mt-4 rounded-xl bg-teal-50 p-3 text-xs text-teal-800">
+          Deine Flyer: {flyersReceived} erhalten · {flyersPlaced} platziert ·{' '}
+          <span className="font-semibold">{flyersReceived - flyersPlaced} übrig</span>
+        </div>
+
+        {role === 'organizer' && (
+          <form onSubmit={handleIssueFlyers} className="mt-2 flex gap-2">
+            <select
+              value={issueMemberId}
+              onChange={(e) => setIssueMemberId(e.target.value)}
+              required
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            >
+              <option value="">Flyer ausgeben an...</option>
+              {orgMembers.map((m) => (
+                <option key={m.profile_id} value={m.profile_id}>
+                  {m.email} ({m.role === 'organizer' ? 'Organisator' : 'Helfer'})
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={1}
+              placeholder="Anzahl"
+              value={issueAmount}
+              onChange={(e) => setIssueAmount(e.target.value)}
+              required
+              className="w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-teal-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
+            >
+              Ausgeben
+            </button>
+          </form>
+        )}
+
         {areas.length === 0 ? (
           <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
             Es gibt noch kein Gebiet für diese Organisation. Aufgaben können erst angelegt werden, wenn
@@ -767,22 +869,6 @@ export default function Tasks() {
         ) : (
           <>
         <form onSubmit={handleAddTask} className="mt-5 space-y-2">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Neue Aufgabe, z.B. Flyer in Eimsbüttel verteilen"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              required
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-            />
-            <button
-              type="submit"
-              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
-            >
-              Anlegen
-            </button>
-          </div>
           <div className="flex gap-2">
             <select
               value={newAreaId}
@@ -801,11 +887,18 @@ export default function Tasks() {
             </select>
             <input
               type="text"
-              placeholder="Adresse (optional)"
+              placeholder="Adresse, z.B. Musterstraße 1"
               value={newAddress}
               onChange={(e) => setNewAddress(e.target.value)}
+              required
               className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             />
+            <button
+              type="submit"
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            >
+              Anlegen
+            </button>
           </div>
         </form>
 
@@ -1138,17 +1231,38 @@ export default function Tasks() {
                     rows={2}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                   />
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600">
-                      Anzahl geführter Gespräche
-                    </label>
-                    <input
-                      type="number"
-                      name="conversation_count"
-                      min={0}
-                      defaultValue={0}
-                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                    />
+                  <input
+                    type="text"
+                    name="contact_name"
+                    placeholder="Name der Gesprächspartnerin/des Gesprächspartners (optional)"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  />
+                  <div className="flex gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">
+                        Geführte Gespräche
+                      </label>
+                      <input
+                        type="number"
+                        name="conversation_count"
+                        min={0}
+                        defaultValue={0}
+                        className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">
+                        Platzierte Flyer
+                      </label>
+                      <input
+                        type="number"
+                        name="flyer_count"
+                        min={0}
+                        max={flyersReceived - flyersPlaced}
+                        defaultValue={0}
+                        className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
                   </div>
                   <button
                     type="submit"
@@ -1175,8 +1289,14 @@ export default function Tasks() {
                     />
                   )}
                   <p className="text-sm text-gray-600">
-                    Geführte Gespräche: <span className="font-medium">{task.conversation_count}</span>
+                    Geführte Gespräche: <span className="font-medium">{task.conversation_count}</span> · Platzierte
+                    Flyer: <span className="font-medium">{task.flyer_count}</span>
                   </p>
+                  {task.contact_name && (
+                    <p className="text-sm text-gray-600">
+                      Gesprächspartner: <span className="font-medium">{task.contact_name}</span>
+                    </p>
+                  )}
                   {task.status === 'erledigt' && (
                     <p className="text-sm font-medium text-emerald-700">+{task.points} Punkte</p>
                   )}
