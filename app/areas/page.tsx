@@ -6,25 +6,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { sleep, geocodeAddress } from '@/lib/geo'
 
 const MapView = dynamic(() => import('../map/MapView'), { ssr: false })
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const AREA_COLORS = ['#0d9488', '#c2410c', '#7c3aed', '#be123c', '#0369a1', '#4d7c0f']
-
-async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`
-    )
-    const results = await res.json()
-    const first = results?.[0]
-    if (!first) return null
-    return { lat: parseFloat(first.lat), lng: parseFloat(first.lon) }
-  } catch {
-    return null
-  }
-}
 
 type Organization = {
   id: string
@@ -48,6 +34,7 @@ type AreaSearchResult = {
 type Task = {
   id: string
   title: string
+  task_number: number
   area_id: string | null
   status: string
   address: string | null
@@ -118,7 +105,7 @@ export default function Areas() {
 
       const { data: taskData } = await supabase
         .from('tasks')
-        .select('id, title, area_id, status, address, lat, lng')
+        .select('id, title, task_number, area_id, status, address, lat, lng')
         .eq('org_id', org.id)
       setTasks(taskData ?? [])
     }
@@ -259,7 +246,9 @@ export default function Areas() {
     )
   }
 
-  const withCoords = tasks.filter((t) => t.lat != null && t.lng != null)
+  const withCoords = tasks
+    .filter((t) => t.lat != null && t.lng != null)
+    .map((t) => ({ ...t, title: `Aufgabe ${t.task_number}` }))
   const missingCoords = tasks.filter((t) => t.address && t.lat == null)
 
   return (
