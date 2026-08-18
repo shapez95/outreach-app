@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet'
+import { useEffect, useState } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents } from 'react-leaflet'
 import type { GeoJSON as GeoJSONType } from 'geojson'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -56,6 +56,41 @@ const myLocationIcon = L.divIcon({
   iconAnchor: [9, 9],
 })
 
+const pendingPointIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;background:#dc2626;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.5);transform:rotate(-45deg);"></div>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 22],
+})
+
+function ClickHandler({ onMapClick }: { onMapClick?: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onMapClick?.(e.latlng.lat, e.latlng.lng)
+    },
+  })
+  return null
+}
+
+function AutoLocate({ onLocate }: { onLocate: (pos: [number, number]) => void }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coords: [number, number] = [position.coords.latitude, position.coords.longitude]
+        onLocate(coords)
+        map.flyTo(coords, 18)
+      },
+      () => {}
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return null
+}
+
 function LocateControl({ onLocate }: { onLocate: (pos: [number, number]) => void }) {
   const map = useMap()
   const [error, setError] = useState('')
@@ -98,19 +133,43 @@ function LocateControl({ onLocate }: { onLocate: (pos: [number, number]) => void
   )
 }
 
-export default function MapView({ tasks, areas = [] }: { tasks: Task[]; areas?: Area[] }) {
+export default function MapView({
+  tasks,
+  areas = [],
+  onMapClick,
+  pendingPoint,
+  autoLocate,
+  initialZoom,
+}: {
+  tasks: Task[]
+  areas?: Area[]
+  onMapClick?: (lat: number, lng: number) => void
+  pendingPoint?: [number, number] | null
+  autoLocate?: boolean
+  initialZoom?: number
+}) {
   const [myLocation, setMyLocation] = useState<[number, number] | null>(null)
   const located = tasks.filter((t) => t.lat != null && t.lng != null)
-  const center: [number, number] =
-    located.length > 0 ? [located[0].lat as number, located[0].lng as number] : [53.5511, 9.9937]
+  const center: [number, number] = pendingPoint
+    ? pendingPoint
+    : located.length > 0
+      ? [located[0].lat as number, located[0].lng as number]
+      : [53.5511, 9.9937]
 
   return (
-    <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
+    <MapContainer center={center} zoom={initialZoom ?? 13} style={{ height: '100%', width: '100%' }}>
+      {autoLocate && <AutoLocate onLocate={setMyLocation} />}
       <LocateControl onLocate={setMyLocation} />
+      <ClickHandler onMapClick={onMapClick} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      {pendingPoint && (
+        <Marker position={pendingPoint} icon={pendingPointIcon}>
+          <Popup>Ausgewählter Punkt</Popup>
+        </Marker>
+      )}
       {myLocation && (
         <Marker position={myLocation} icon={myLocationIcon}>
           <Popup>Dein Standort</Popup>

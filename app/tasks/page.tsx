@@ -2,12 +2,31 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import type { Session } from '@supabase/supabase-js'
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
 import { point } from '@turf/helpers'
 import type { Feature, Geometry } from 'geojson'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
+
+const MapView = dynamic(() => import('../map/MapView'), { ssr: false })
+
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`
+    )
+    const data = await res.json()
+    const addr = data?.address
+    if (addr?.road) {
+      return [addr.road, addr.house_number].filter(Boolean).join(' ')
+    }
+    return data?.display_name ?? null
+  } catch {
+    return null
+  }
+}
 
 type Task = {
   id: string
@@ -198,6 +217,12 @@ export default function Tasks() {
     'driving'
   )
   const [routeLegs, setRouteLegs] = useState<{ label: string; url: string }[]>([])
+  const [workMode, setWorkMode] = useState<'unset' | 'free' | 'list'>('unset')
+  const [freePoint, setFreePoint] = useState<{ lat: number; lng: number } | null>(null)
+  const [freeAddress, setFreeAddress] = useState('')
+  const [freeCategory, setFreeCategory] = useState('privathaushalt')
+  const [freeSubmitting, setFreeSubmitting] = useState(false)
+  const [freeMessage, setFreeMessage] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -326,6 +351,92 @@ export default function Tasks() {
     } else {
       setIssueMemberId('')
       setIssueAmount('')
+      loadTasks()
+    }
+  }
+
+  async function handleMapTap(lat: number, lng: number) {
+    setFreePoint({ lat, lng })
+    setFreeAddress('Adresse wird ermittelt...')
+    setFreeMessage('')
+    const address = await reverseGeocode(lat, lng)
+    setFreeAddress(address ?? '')
+  }
+
+  async function handleFreeSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!freePoint || !organization || !session) return
+
+    const matchedArea = areas
+      .filter((a) => a.boundary)
+      .find((a) => isWithinArea(a, freePoint.lat, freePoint.lng))
+
+    if (!matchedArea) {
+      setFreeMessage('Fehler: Dieser Punkt liegt in keinem eurer Gebiete.')
+      return
+    }
+
+    if (
+      freeAddress &&
+      tasks.some((t) => t.address && normalizeAddress(t.address) === normalizeAddress(freeAddress))
+    ) {
+      setFreeMessage(`Fehler: Es gibt bereits eine Aufgabe mit der Adresse "${freeAddress}".`)
+      return
+    }
+
+    const form = e.currentTarget
+    const fileInput = form.elements.namedItem('photo') as HTMLInputElement
+    const commentInput = form.elements.namedItem('comment') as HTMLTextAreaElement
+    const conversationInput = form.elements.namedItem('conversation_count') as HTMLInputElement
+    const flyerInput = form.elements.namedItem('flyer_count') as HTMLInputElement
+    const contactInput = form.elements.namedItem('contact_name') as HTMLInputElement
+    const file = fileInput.files?.[0]
+    if (!file) return
+
+    const flyerCount = Number(flyerInput.value) || 0
+    const flyersRemaining = flyersReceived - flyersPlaced
+    if (flyerCount > flyersRemaining) {
+      setFreeMessage(`Fehler: Du hast nur noch ${flyersRemaining} Flyer übrig.`)
+      return
+    }
+
+    setFreeSubmitting(true)
+
+    const ext = file.name.split('.').pop() ?? 'jpg'
+    const path = `${organization.id}/${crypto.randomUUID()}.${ext}`
+
+    const { error: uploadError } = await supabase.storage.from('task-proofs').upload(path, file)
+    if (uploadError) {
+      setFreeMessage('Fehler beim Hochladen: ' + uploadError.message)
+      setFreeSubmitting(false)
+      return
+    }
+
+    const { error } = await supabase.from('tasks').insert({
+      org_id: organization.id,
+      title: freeAddress || `${freePoint.lat}, ${freePoint.lng}`,
+      address: freeAddress || null,
+      area_id: matchedArea.id,
+      category: freeCategory,
+      lat: freePoint.lat,
+      lng: freePoint.lng,
+      status: 'zur_pruefung',
+      assigned_to: session.user.id,
+      proof_path: path,
+      comment: commentInput.value || null,
+      conversation_count: Number(conversationInput.value) || 0,
+      flyer_count: flyerCount,
+      contact_name: contactInput.value || null,
+    })
+
+    setFreeSubmitting(false)
+
+    if (error) {
+      setFreeMessage('Fehler: ' + error.message)
+    } else {
+      setFreePoint(null)
+      setFreeAddress('')
+      setFreeMessage('Danke! Dein Eintrag wartet auf Bestätigung durch den Organisator.')
       loadTasks()
     }
   }
@@ -994,9 +1105,150 @@ export default function Tasks() {
               'Frag deinen Organisator.'
             )}
           </div>
+        ) : workMode === 'unset' ? (
+          <div className="mt-5 rounded-xl border border-gray-200 bg-white p-5 text-center">
+            <p className="text-sm font-medium text-gray-700">Wie möchtest du arbeiten?</p>
+            <div className="mt-3 flex flex-col gap-2">
+              <button
+                onClick={() => setWorkMode('free')}
+                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+              >
+                🗺️ Freies Outreach (über die Karte)
+              </button>
+              <button
+                onClick={() => setWorkMode('list')}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                📋 Aus der Aufgabenliste arbeiten
+              </button>
+            </div>
+          </div>
+        ) : workMode === 'free' ? (
+          <div className="mt-5">
+            <button
+              onClick={() => {
+                setWorkMode('unset')
+                setFreePoint(null)
+                setFreeAddress('')
+                setFreeMessage('')
+              }}
+              className="text-xs font-medium text-teal-600 hover:text-teal-700"
+            >
+              ← Modus wechseln
+            </button>
+
+            <p className="mt-2 text-xs text-gray-500">
+              Tipp auf der Karte auf das Haus/Geschäft, bei dem du gerade bist.
+            </p>
+
+            <div className="mt-2 h-72 overflow-hidden rounded-2xl border border-gray-200">
+              <MapView
+                tasks={tasks.filter((t) => t.lat != null && t.lng != null)}
+                areas={areas}
+                onMapClick={handleMapTap}
+                pendingPoint={freePoint ? [freePoint.lat, freePoint.lng] : null}
+                autoLocate
+                initialZoom={18}
+              />
+            </div>
+
+            {freePoint && (
+              <form
+                onSubmit={handleFreeSubmit}
+                className="mt-3 space-y-2 rounded-xl border border-gray-200 bg-white p-3"
+              >
+                <div>
+                  <label className="block text-xs font-medium text-gray-600">Adresse</label>
+                  <input
+                    type="text"
+                    value={freeAddress}
+                    onChange={(e) => setFreeAddress(e.target.value)}
+                    required
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600">Kategorie</label>
+                  <select
+                    value={freeCategory}
+                    onChange={(e) => setFreeCategory(e.target.value)}
+                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  type="file"
+                  name="photo"
+                  accept="image/*"
+                  required
+                  className="block w-full text-sm text-gray-600"
+                />
+                <input
+                  type="text"
+                  name="contact_name"
+                  placeholder="Name der Gesprächspartnerin/des Gesprächspartners (optional)"
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+                <textarea
+                  name="comment"
+                  placeholder="Kommentar (optional), z.B. was ist passiert?"
+                  rows={2}
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+                <div className="flex gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600">Geführte Gespräche</label>
+                    <input
+                      type="number"
+                      name="conversation_count"
+                      min={0}
+                      defaultValue={0}
+                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600">Platzierte Flyer</label>
+                    <input
+                      type="number"
+                      name="flyer_count"
+                      min={0}
+                      defaultValue={0}
+                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={freeSubmitting}
+                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {freeSubmitting ? 'Wird gespeichert...' : 'Einreichen'}
+                </button>
+              </form>
+            )}
+
+            {freeMessage && (
+              <p
+                className={`mt-3 text-sm ${freeMessage.startsWith('Fehler') ? 'text-red-600' : 'text-emerald-600'}`}
+              >
+                {freeMessage}
+              </p>
+            )}
+          </div>
         ) : (
           <>
-        <form onSubmit={handleAddTask} className="mt-5 space-y-2">
+        <button
+          onClick={() => setWorkMode('unset')}
+          className="mt-5 text-xs font-medium text-teal-600 hover:text-teal-700"
+        >
+          ← Modus wechseln
+        </button>
+        <form onSubmit={handleAddTask} className="mt-2 space-y-2">
           <div className="flex gap-2">
             <select
               value={newAreaId}
@@ -1498,7 +1750,6 @@ export default function Tasks() {
                         type="number"
                         name="flyer_count"
                         min={0}
-                        max={flyersReceived - flyersPlaced}
                         defaultValue={0}
                         className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                       />
