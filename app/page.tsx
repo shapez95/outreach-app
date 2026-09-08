@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { Session } from '@supabase/supabase-js'
+import { Trophy, PaperPlaneTilt } from '@phosphor-icons/react'
 import { supabase } from '@/lib/supabase'
 
 type Organization = {
@@ -118,7 +119,7 @@ export default function Home() {
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="text-gray-500">Lade...</p>
+        <p className="text-muted-foreground">Lade...</p>
       </main>
     )
   }
@@ -126,24 +127,28 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center px-4 py-10">
       <div className="w-full max-w-md">
-        <h1 className="text-2xl font-bold text-gray-900">Outreach App</h1>
+        <div className="flex items-center gap-2">
+          <PaperPlaneTilt size={26} weight="fill" className="text-primary" aria-hidden="true" />
+          <h1 className="text-2xl font-bold text-foreground">Outreach App</h1>
+        </div>
 
-        <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mt-4 rounded-2xl border border-border bg-card p-5">
           {session ? (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-600">
-                Eingeloggt als <span className="font-medium text-gray-900">{session.user.email}</span>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Eingeloggt als <span className="font-medium text-foreground">{session.user.email}</span>
               </p>
 
-              <div className="rounded-xl bg-teal-50 p-4">
-                <p className="text-xs text-teal-800">
+              <div className="rounded-xl bg-primary/10 p-4">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-primary-hover">
+                  <Trophy size={16} weight="fill" aria-hidden="true" />
                   Deine Punkte zeigen deinen persönlichen Fortschritt – kein Ranking, nur du vs. du.
-                </p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-teal-700">{totalPoints}</span>
-                  <span className="text-sm text-teal-800">Punkte</span>
                 </div>
-                <p className="mt-1 text-xs text-teal-800">
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-primary-hover">{totalPoints}</span>
+                  <span className="text-sm text-primary-hover">Punkte</span>
+                </div>
+                <p className="mt-1 text-xs text-primary-hover">
                   {tasksDone} Aufgabe{tasksDone === 1 ? '' : 'n'} erledigt · {conversationsHeld} Gespräch
                   {conversationsHeld === 1 ? '' : 'e'} geführt
                 </p>
@@ -151,14 +156,17 @@ export default function Home() {
 
               {role === 'organizer' && (
                 <div>
-                  <form onSubmit={handleIssueFlyers} className="flex gap-2">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Flyer an Team-Mitglied ausgeben
+                  </label>
+                  <form onSubmit={handleIssueFlyers} className="mt-1 flex gap-2">
                     <select
                       value={issueMemberId}
                       onChange={(e) => setIssueMemberId(e.target.value)}
                       required
-                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     >
-                      <option value="">Flyer ausgeben an...</option>
+                      <option value="">Person wählen...</option>
                       {orgMembers.map((m) => (
                         <option key={m.profile_id} value={m.profile_id}>
                           {m.email} ({m.role === 'organizer' ? 'Organisator' : 'Helfer'})
@@ -169,21 +177,23 @@ export default function Home() {
                       type="number"
                       min={1}
                       placeholder="Anzahl"
+                      aria-label="Anzahl Flyer"
                       value={issueAmount}
                       onChange={(e) => setIssueAmount(e.target.value)}
                       required
-                      className="w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      className="w-24 rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                     <button
                       type="submit"
-                      className="rounded-lg bg-teal-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
+                      className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-hover"
                     >
                       Ausgeben
                     </button>
                   </form>
                   {issueMessage && (
                     <p
-                      className={`mt-1 text-xs ${issueMessage.startsWith('Fehler') ? 'text-red-600' : 'text-emerald-600'}`}
+                      role="status"
+                      className={`mt-1 text-xs ${issueMessage.startsWith('Fehler') ? 'text-destructive' : 'text-status-erledigt'}`}
                     >
                       {issueMessage}
                     </p>
@@ -193,17 +203,17 @@ export default function Home() {
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm text-gray-600">Nicht eingeloggt.</p>
+              <p className="text-sm text-muted-foreground">Nicht eingeloggt.</p>
               <div className="flex items-center gap-3">
                 <Link
                   href="/login"
-                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
                 >
                   Einloggen
                 </Link>
                 <Link
                   href="/signup"
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
                 >
                   Registrieren
                 </Link>

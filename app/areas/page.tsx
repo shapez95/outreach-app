@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session } from '@supabase/supabase-js'
+import type { Geometry } from 'geojson'
 import { supabase } from '@/lib/supabase'
 import { sleep, geocodeAddress } from '@/lib/geo'
 
@@ -40,6 +41,7 @@ type Task = {
   address: string | null
   lat: number | null
   lng: number | null
+  building_boundary?: Geometry | null
 }
 
 type Membership = {
@@ -207,7 +209,7 @@ export default function Areas() {
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="text-gray-500">Lade...</p>
+        <p className="text-muted-foreground">Lade...</p>
       </main>
     )
   }
@@ -215,11 +217,11 @@ export default function Areas() {
   if (!session) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">Du musst eingeloggt sein, um Gebiete zu sehen.</p>
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">Du musst eingeloggt sein, um Gebiete zu sehen.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
           >
             Zum Login
           </Link>
@@ -231,13 +233,13 @@ export default function Areas() {
   if (orgChecked && !organization) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">
             Du bist noch keiner Organisation beigetreten. Frag deinen Organisator nach dem Einladungscode.
           </p>
           <Link
             href="/join"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
           >
             Organisation beitreten
           </Link>
@@ -255,16 +257,16 @@ export default function Areas() {
     <main className="flex flex-1 flex-col items-center px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold text-foreground">
             Gebiete & Karte{organization ? ` – ${organization.name}` : ''}
           </h1>
-          <Link href="/tasks" className="text-sm font-medium text-teal-600 hover:text-teal-700">
+          <Link href="/tasks" className="text-sm font-medium text-primary hover:text-primary-hover">
             Zu den Aufgaben →
           </Link>
         </div>
 
         {withCoords.length > 0 ? (
-          <div className="mt-4 h-72 overflow-hidden rounded-2xl border border-gray-200">
+          <div className="mt-4 h-72 overflow-hidden rounded-2xl border border-border">
             <MapView tasks={withCoords} areas={areas} />
           </div>
         ) : null}
@@ -274,7 +276,7 @@ export default function Areas() {
             {areas
               .filter((a) => a.boundary)
               .map((a, i) => (
-                <span key={a.id} className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span key={a.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span
                     className="inline-block h-2.5 w-2.5 rounded-full"
                     style={{ background: AREA_COLORS[i % AREA_COLORS.length] }}
@@ -286,7 +288,7 @@ export default function Areas() {
         )}
 
         {withCoords.length === 0 && (
-          <p className="mt-4 text-sm text-gray-500">
+          <p className="mt-4 text-sm text-muted-foreground">
             Noch keine Aufgaben mit Koordinaten. Sobald Aufgaben eine Adresse haben, erscheinen sie hier als Pins.
           </p>
         )}
@@ -295,7 +297,7 @@ export default function Areas() {
           <button
             onClick={handleBackfillCoordinates}
             disabled={backfilling}
-            className="mt-2 text-xs font-medium text-teal-600 hover:text-teal-700 disabled:opacity-50"
+            className="mt-2 text-xs font-medium text-primary hover:text-primary-hover disabled:opacity-50"
           >
             {backfilling
               ? `Koordinaten werden ermittelt... (${missingCoords.length})`
@@ -305,7 +307,7 @@ export default function Areas() {
 
         {role === 'organizer' && (
           <div className="mt-5">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted-foreground">
               Neues Gebiet hinzufügen. Aufgaben mit diesem Gebiet können nur innerhalb seiner Grenzen
               angelegt werden.
             </p>
@@ -316,24 +318,24 @@ export default function Areas() {
                 value={areaQuery}
                 onChange={(e) => setAreaQuery(e.target.value)}
                 required
-                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <button
                 type="submit"
                 disabled={searchingArea}
-                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
               >
                 {searchingArea ? 'Suche...' : 'Suchen'}
               </button>
             </form>
 
             {areaSearchResults.length > 0 && (
-              <ul className="mt-2 space-y-1 rounded-lg border border-gray-200 bg-white p-2">
+              <ul className="mt-2 space-y-1 rounded-lg border border-border bg-card p-2">
                 {areaSearchResults.map((result, i) => (
                   <li key={i}>
                     <button
                       onClick={() => handleSelectAreaResult(result)}
-                      className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50"
+                      className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
                     >
                       {result.display_name}
                     </button>
@@ -344,7 +346,7 @@ export default function Areas() {
           </div>
         )}
 
-        {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
+        {message && <p className="mt-3 text-sm text-destructive">{message}</p>}
 
         <ul className="mt-6 space-y-3">
           {areas.map((area) => {
@@ -356,19 +358,19 @@ export default function Areas() {
             return (
               <li
                 key={area.id}
-                className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm hover:border-teal-300"
+                className="rounded-2xl border border-border bg-card p-4 hover:border-primary/40"
               >
                 <button
                   onClick={() => handleOpenAreaTasks(area.id)}
                   className="block w-full text-left"
                 >
                   <div className="flex items-center justify-between">
-                    <p className="font-medium text-gray-900">{area.name}</p>
-                    <span className="text-sm text-gray-600">
+                    <p className="font-medium text-foreground">{area.name}</p>
+                    <span className="text-sm text-muted-foreground">
                       {done}/{total} erledigt
                     </span>
                   </div>
-                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
                     <div
                       className="h-full rounded-full bg-emerald-500"
                       style={{ width: `${percent}%` }}
@@ -378,7 +380,7 @@ export default function Areas() {
                 {role === 'organizer' && (
                   <button
                     onClick={() => handleDeleteArea(area.id)}
-                    className="mt-2 text-xs font-medium text-gray-400 hover:text-red-600"
+                    className="mt-2 text-xs font-medium text-muted-foreground hover:text-destructive"
                   >
                     Löschen
                   </button>
@@ -387,7 +389,7 @@ export default function Areas() {
             )
           })}
           {areas.length === 0 && (
-            <li className="text-sm text-gray-500">
+            <li className="text-sm text-muted-foreground">
               Noch keine Gebiete{role === 'organizer' ? ' – leg oben das erste an.' : '.'}
             </li>
           )}

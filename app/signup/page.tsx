@@ -22,33 +22,41 @@ export default function SignUp() {
 
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-10">
-      <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">Registrieren</h1>
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6">
+        <h1 className="text-xl font-bold text-foreground">Registrieren</h1>
 
         <form onSubmit={handleSignUp} className="mt-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">E-Mail</label>
+            <label htmlFor="signup-email" className="block text-sm font-medium text-foreground">
+              E-Mail
+            </label>
             <input
+              id="signup-email"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Passwort</label>
+            <label htmlFor="signup-password" className="block text-sm font-medium text-foreground">
+              Passwort
+            </label>
             <input
+              id="signup-password"
               type="password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
           <button
             type="submit"
-            className="w-full rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
           >
             Registrieren
           </button>
@@ -56,15 +64,16 @@ export default function SignUp() {
 
         {message && (
           <p
-            className={`mt-4 text-sm ${message.startsWith('Fehler') ? 'text-red-600' : 'text-emerald-600'}`}
+            role={message.startsWith('Fehler') ? 'alert' : 'status'}
+            className={`mt-4 text-sm ${message.startsWith('Fehler') ? 'text-destructive' : 'text-status-erledigt'}`}
           >
             {message}
           </p>
         )}
 
-        <p className="mt-5 text-sm text-gray-600">
+        <p className="mt-5 text-sm text-muted-foreground">
           Schon registriert?{' '}
-          <Link href="/login" className="font-medium text-teal-600 hover:text-teal-700">
+          <Link href="/login" className="font-medium text-primary hover:text-primary-hover">
             Einloggen
           </Link>
         </p>

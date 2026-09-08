@@ -51,7 +51,7 @@ export default function Join() {
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="text-gray-500">Lade...</p>
+        <p className="text-muted-foreground">Lade...</p>
       </main>
     )
   }
@@ -59,11 +59,11 @@ export default function Join() {
   if (!session) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">Du musst eingeloggt sein, um einer Organisation beizutreten.</p>
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">Du musst eingeloggt sein, um einer Organisation beizutreten.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
           >
             Zum Login
           </Link>
@@ -74,51 +74,58 @@ export default function Join() {
 
   return (
     <main className="flex flex-1 flex-col items-center px-4 py-10">
-      <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">Organisation beitreten</h1>
-        <p className="mt-1 text-sm text-gray-600">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6">
+        <h1 className="text-xl font-bold text-foreground">Organisation beitreten</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Gib den Einladungscode ein, den du von deinem Organisator bekommen hast.
         </p>
 
         <form onSubmit={handleJoin} className="mt-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Einladungscode</label>
+            <label htmlFor="join-code" className="block text-sm font-medium text-foreground">
+              Einladungscode
+            </label>
             <input
+              id="join-code"
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               required
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm uppercase focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm uppercase focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
           <button
             type="submit"
-            className="w-full rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
           >
             Beitreten
           </button>
         </form>
 
-        {message && <p className="mt-4 text-sm text-red-600">{message}</p>}
+        {message && (
+          <p role="alert" className="mt-4 text-sm text-destructive">
+            {message}
+          </p>
+        )}
       </div>
 
-      <div className="mt-6 w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-gray-900">Neue Organisation gründen</h2>
-        <p className="mt-1 text-sm text-gray-600">
+      <div className="mt-6 w-full max-w-sm rounded-2xl border border-border bg-card p-6">
+        <h2 className="text-lg font-bold text-foreground">Neue Organisation gründen</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
           Du wirst automatisch Organisator und bekommst einen Einladungscode zum Weitergeben.
         </p>
 
         {createdCode ? (
           <div className="mt-4 space-y-3">
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-foreground">
               Organisation gegründet! Dein Einladungscode:
             </p>
-            <p className="rounded-lg bg-gray-100 px-3 py-2 text-center font-mono text-lg font-semibold tracking-wider text-gray-900">
+            <p className="rounded-lg bg-muted px-3 py-2 text-center font-mono text-lg font-semibold tracking-wider text-foreground">
               {createdCode}
             </p>
             <Link
               href="/"
-              className="block rounded-lg bg-teal-600 px-4 py-2 text-center text-sm font-medium text-white hover:bg-teal-700"
+              className="block rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-on-primary hover:bg-primary-hover"
             >
               Weiter zur Startseite
             </Link>
@@ -126,25 +133,32 @@ export default function Join() {
         ) : (
           <form onSubmit={handleCreateOrg} className="mt-4 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Name der Organisation</label>
+              <label htmlFor="org-name" className="block text-sm font-medium text-foreground">
+                Name der Organisation
+              </label>
               <input
+                id="org-name"
                 type="text"
                 value={newOrgName}
                 onChange={(e) => setNewOrgName(e.target.value)}
                 required
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
             <button
               type="submit"
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="w-full rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
             >
               Gründen
             </button>
           </form>
         )}
 
-        {createMessage && <p className="mt-4 text-sm text-red-600">{createMessage}</p>}
+        {createMessage && (
+          <p role="alert" className="mt-4 text-sm text-destructive">
+            {createMessage}
+          </p>
+        )}
       </div>
     </main>
   )

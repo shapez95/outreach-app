@@ -6,9 +6,24 @@ import dynamic from 'next/dynamic'
 import type { Session } from '@supabase/supabase-js'
 import type { Geometry } from 'geojson'
 import * as XLSX from 'xlsx'
+import {
+  MapTrifold,
+  ListChecks,
+  X,
+  Compass,
+  Car,
+  PersonSimpleWalk,
+  Bus,
+  MapPin,
+  Question,
+  Circle,
+  Clock,
+  PaperPlaneTilt,
+  CheckCircle,
+} from '@phosphor-icons/react'
 import { supabase } from '@/lib/supabase'
 import {
-  reverseGeocode,
+  reverseGeocodeWithBuilding,
   geocodeAddress,
   normalizeAddress,
   isWithinArea,
@@ -38,11 +53,15 @@ type Task = {
   category: string | null
   lat: number | null
   lng: number | null
+  building_boundary: Geometry | null
   created_at: string
 }
 
 const POINTS_PER_TASK = 10
 const POINTS_PER_CONVERSATION = 5
+
+// Google Maps directions links allow at most 9 waypoints between origin and destination (10 stops per link).
+const GOOGLE_MAPS_MAX_WAYPOINTS = 9
 
 type Organization = {
   id: string
@@ -70,17 +89,27 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_STYLES: Record<string, string> = {
   vorschlag: 'bg-purple-100 text-purple-800',
-  offen: 'bg-gray-100 text-gray-700',
+  offen: 'bg-muted text-foreground',
   in_bearbeitung: 'bg-amber-100 text-amber-800',
   zur_pruefung: 'bg-blue-100 text-blue-800',
   erledigt: 'bg-emerald-100 text-emerald-800',
 }
 
+const STATUS_ICONS: Record<string, typeof Question> = {
+  vorschlag: Question,
+  offen: Circle,
+  in_bearbeitung: Clock,
+  zur_pruefung: PaperPlaneTilt,
+  erledigt: CheckCircle,
+}
+
 function StatusBadge({ status }: { status: string }) {
+  const Icon = STATUS_ICONS[status] ?? Question
   return (
     <span
-      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-700'}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? 'bg-muted text-foreground'}`}
     >
+      <Icon size={12} weight="bold" aria-hidden="true" />
       {STATUS_LABELS[status] ?? status}
     </span>
   )
@@ -111,13 +140,13 @@ export default function Tasks() {
   const [routeError, setRouteError] = useState('')
   const [routeStart, setRouteStart] = useState('current')
   const [routeEnd, setRouteEnd] = useState('auto')
-  const [routeTravelMode, setRouteTravelMode] = useState<'driving' | 'walking' | 'bicycling' | 'transit'>(
-    'driving'
-  )
-  const [routeLegs, setRouteLegs] = useState<{ label: string; url: string }[]>([])
+  const [routeLegs, setRouteLegs] = useState<{ label: string; driving: string; walking: string }[]>([])
+  const [routeTransitLegs, setRouteTransitLegs] = useState<{ label: string; url: string }[]>([])
   const [workMode, setWorkMode] = useState<'unset' | 'free' | 'list'>('unset')
   const [freePoint, setFreePoint] = useState<{ lat: number; lng: number } | null>(null)
   const [freeAddress, setFreeAddress] = useState('')
+  const [freeBuildingBoundary, setFreeBuildingBoundary] = useState<Geometry | null>(null)
+  const [freeFlyerCount, setFreeFlyerCount] = useState(0)
   const [freeCategory, setFreeCategory] = useState('privathaushalt')
   const [freeSubmitting, setFreeSubmitting] = useState(false)
   const [freeMessage, setFreeMessage] = useState('')
@@ -246,10 +275,61 @@ export default function Tasks() {
   async function handleMapTap(lat: number, lng: number) {
     setFreePoint({ lat, lng })
     setFreeAddress('Adresse wird ermittelt...')
+    setFreeBuildingBoundary(null)
     setFreeMessage('')
-    const address = await reverseGeocode(lat, lng)
+    const { address, boundary } = await reverseGeocodeWithBuilding(lat, lng)
     setFreeAddress(address ?? '')
+    setFreeBuildingBoundary(boundary)
   }
+
+  useEffect(() => {
+    if (workMode !== 'free' || freePoint || !navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        handleMapTap(position.coords.latitude, position.coords.longitude)
+      },
+      () => setFreeAddress('Standort konnte nicht ermittelt werden. Bitte auf der Karte antippen.')
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workMode])
+
+  // Hält den Bildschirm während des freien Outreach wach, damit man nicht ständig
+  // entsperren muss, um einen Flyer-Zähler einzutippen - wird bei Verlassen des Modus
+  // (oder Tab-Wechsel/Verlust der Sichtbarkeit) automatisch wieder freigegeben.
+  useEffect(() => {
+    if (workMode !== 'free' || !('wakeLock' in navigator)) return
+
+    let wakeLock: WakeLockSentinel | null = null
+    let cancelled = false
+
+    async function requestWakeLock() {
+      try {
+        const lock = await navigator.wakeLock.request('screen')
+        if (cancelled) {
+          lock.release()
+        } else {
+          wakeLock = lock
+        }
+      } catch {
+        // Wake Lock kann z.B. bei niedrigem Akku oder fehlender Erlaubnis scheitern - ignorieren.
+      }
+    }
+
+    requestWakeLock()
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && !wakeLock) {
+        requestWakeLock()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      wakeLock?.release()
+    }
+  }, [workMode])
 
   async function handleFreeSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -279,7 +359,6 @@ export default function Tasks() {
     const flyerInput = form.elements.namedItem('flyer_count') as HTMLInputElement
     const contactInput = form.elements.namedItem('contact_name') as HTMLInputElement
     const file = fileInput.files?.[0]
-    if (!file) return
 
     const flyerCount = Number(flyerInput.value) || 0
     const flyersRemaining = flyersReceived - flyersPlaced
@@ -290,14 +369,17 @@ export default function Tasks() {
 
     setFreeSubmitting(true)
 
-    const ext = file.name.split('.').pop() ?? 'jpg'
-    const path = `${organization.id}/${crypto.randomUUID()}.${ext}`
+    let path: string | null = null
+    if (file) {
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      path = `${organization.id}/${crypto.randomUUID()}.${ext}`
 
-    const { error: uploadError } = await supabase.storage.from('task-proofs').upload(path, file)
-    if (uploadError) {
-      setFreeMessage('Fehler beim Hochladen: ' + uploadError.message)
-      setFreeSubmitting(false)
-      return
+      const { error: uploadError } = await supabase.storage.from('task-proofs').upload(path, file)
+      if (uploadError) {
+        setFreeMessage('Fehler beim Hochladen: ' + uploadError.message)
+        setFreeSubmitting(false)
+        return
+      }
     }
 
     const conversationCount = Number(conversationInput.value) || 0
@@ -311,6 +393,7 @@ export default function Tasks() {
       category: freeCategory,
       lat: freePoint.lat,
       lng: freePoint.lng,
+      building_boundary: freeBuildingBoundary,
       status: selfConfirmed ? 'erledigt' : 'zur_pruefung',
       assigned_to: session.user.id,
       proof_path: path,
@@ -328,6 +411,8 @@ export default function Tasks() {
     } else {
       setFreePoint(null)
       setFreeAddress('')
+      setFreeBuildingBoundary(null)
+      setFreeFlyerCount(0)
       setFreeMessage(
         selfConfirmed
           ? 'Danke! Als Organisator wurde dein Eintrag direkt bestätigt.'
@@ -438,7 +523,6 @@ export default function Tasks() {
     const flyerInput = form.elements.namedItem('flyer_count') as HTMLInputElement
     const contactInput = form.elements.namedItem('contact_name') as HTMLInputElement
     const file = fileInput.files?.[0]
-    if (!file) return
 
     const flyerCount = Number(flyerInput.value) || 0
     const flyersRemaining = flyersReceived - flyersPlaced
@@ -450,15 +534,18 @@ export default function Tasks() {
     setUploadingTaskId(task.id)
     setMessage('')
 
-    const ext = file.name.split('.').pop() ?? 'jpg'
-    const path = `${organization.id}/${task.id}-${Date.now()}.${ext}`
+    let path: string | null = null
+    if (file) {
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      path = `${organization.id}/${task.id}-${Date.now()}.${ext}`
 
-    const { error: uploadError } = await supabase.storage.from('task-proofs').upload(path, file)
+      const { error: uploadError } = await supabase.storage.from('task-proofs').upload(path, file)
 
-    if (uploadError) {
-      setMessage('Fehler beim Hochladen: ' + uploadError.message)
-      setUploadingTaskId(null)
-      return
+      if (uploadError) {
+        setMessage('Fehler beim Hochladen: ' + uploadError.message)
+        setUploadingTaskId(null)
+        return
+      }
     }
 
     const conversationCount = Number(conversationInput.value) || 0
@@ -536,6 +623,7 @@ export default function Tasks() {
   async function handleOpenRoute() {
     setRouteError('')
     setRouteLegs([])
+    setRouteTransitLegs([])
     const selectedTasks = tasks.filter(
       (t) => selectedForRoute.has(t.id) && t.lat != null && t.lng != null
     ) as (Task & { lat: number; lng: number })[]
@@ -589,16 +677,51 @@ export default function Tasks() {
       stops = [startPoint, ...ordered]
     }
 
-    const legs = []
+    // Google Maps only allows a limited number of waypoints per link, so split into
+    // chunks of at most GOOGLE_MAPS_MAX_WAYPOINTS + 2 stops if needed. The last stop of
+    // one chunk becomes the first stop of the next, so the tour stays one continuous route.
+    const stopsPerChunk = GOOGLE_MAPS_MAX_WAYPOINTS + 2
+    const chunks: (typeof stops)[] = []
+    for (let i = 0; i < stops.length - 1; i += stopsPerChunk - 1) {
+      chunks.push(stops.slice(i, i + stopsPerChunk))
+    }
+
+    const legs = chunks.map((chunk, i) => {
+      const origin = chunk[0]
+      const destination = chunk[chunk.length - 1]
+      const waypoints = chunk.slice(1, -1)
+      const waypointsParam =
+        waypoints.length > 0
+          ? `&waypoints=${waypoints.map((w) => `${w.lat},${w.lng}`).join('|')}`
+          : ''
+      const base =
+        `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}` +
+        `&destination=${destination.lat},${destination.lng}${waypointsParam}`
+      const label =
+        chunks.length > 1
+          ? `${i + 1}. ${origin.label} → ${destination.label} (${chunk.length} Stopps)`
+          : `${origin.label} → ${destination.label} (${chunk.length} Stopps)`
+      return {
+        label,
+        driving: `${base}&travelmode=driving`,
+        walking: `${base}&travelmode=walking`,
+      }
+    })
+    setRouteLegs(legs)
+
+    // Transit directions don't support waypoints, so each stop-to-stop hop gets its own link.
+    const transitLegs = []
     for (let i = 0; i < stops.length - 1; i++) {
       const from = stops[i]
       const to = stops[i + 1]
-      const url =
-        `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}` +
-        `&travelmode=${routeTravelMode}`
-      legs.push({ label: `${i + 1}. ${from.label} → ${to.label}`, url })
+      transitLegs.push({
+        label: `${i + 1}. ${from.label} → ${to.label}`,
+        url:
+          `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}` +
+          `&destination=${to.lat},${to.lng}&travelmode=transit`,
+      })
     }
-    setRouteLegs(legs)
+    setRouteTransitLegs(transitLegs)
   }
 
   function sortTasks(list: Task[]) {
@@ -618,7 +741,7 @@ export default function Tasks() {
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="text-gray-500">Lade...</p>
+        <p className="text-muted-foreground">Lade...</p>
       </main>
     )
   }
@@ -626,11 +749,11 @@ export default function Tasks() {
   if (!session) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">Du musst eingeloggt sein, um Aufgaben zu sehen.</p>
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">Du musst eingeloggt sein, um Aufgaben zu sehen.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
           >
             Zum Login
           </Link>
@@ -642,13 +765,13 @@ export default function Tasks() {
   if (orgChecked && !organization) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">
             Du bist noch keiner Organisation beigetreten. Frag deinen Organisator nach dem Einladungscode.
           </p>
           <Link
             href="/join"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
           >
             Organisation beitreten
           </Link>
@@ -661,7 +784,7 @@ export default function Tasks() {
     <main className="flex flex-1 justify-center px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold text-foreground">
             Aufgaben
             {filterAreaId ? ` – ${areas.find((a) => a.id === filterAreaId)?.name ?? ''}` : ''}
           </h1>
@@ -669,15 +792,15 @@ export default function Tasks() {
             {role === 'organizer' && tasks.length > 0 && (
               <button
                 onClick={handleExportExcel}
-                className="text-sm font-medium text-teal-600 hover:text-teal-700"
+                className="text-sm font-medium text-primary hover:text-primary-hover"
               >
                 Als Excel exportieren
               </button>
             )}
-            <Link href="/areas" className="text-sm font-medium text-teal-600 hover:text-teal-700">
+            <Link href="/areas" className="text-sm font-medium text-primary hover:text-primary-hover">
               Gebiete & Karte
             </Link>
-            <Link href="/" className="text-sm font-medium text-teal-600 hover:text-teal-700">
+            <Link href="/" className="text-sm font-medium text-primary hover:text-primary-hover">
               ← Zurück
             </Link>
           </div>
@@ -686,13 +809,13 @@ export default function Tasks() {
         {filterAreaId && (
           <button
             onClick={handleClearAreaFilter}
-            className="mt-1 text-xs font-medium text-teal-600 hover:text-teal-700"
+            className="mt-1 text-xs font-medium text-primary hover:text-primary-hover"
           >
             Alle Aufgaben zeigen (Gebietsfilter aufheben)
           </button>
         )}
 
-        <div className="mt-4 rounded-xl bg-teal-50 p-3 text-xs text-teal-800">
+        <div className="mt-4 rounded-xl bg-primary/10 p-3 text-xs text-primary-hover">
           {role === 'organizer' ? (
             <>
               Deine Flyer: <span className="font-semibold">unbegrenzt</span> (als Organisator)
@@ -706,11 +829,11 @@ export default function Tasks() {
         </div>
 
         {areas.length === 0 ? (
-          <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+          <div className="mt-5 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
             Es gibt noch kein Gebiet für diese Organisation. Aufgaben können erst angelegt werden, wenn
             mindestens ein Gebiet existiert.{' '}
             {role === 'organizer' ? (
-              <Link href="/areas" className="font-medium text-teal-600 hover:text-teal-700">
+              <Link href="/areas" className="font-medium text-primary hover:text-primary-hover">
                 Jetzt Gebiet anlegen
               </Link>
             ) : (
@@ -718,20 +841,22 @@ export default function Tasks() {
             )}
           </div>
         ) : workMode === 'unset' ? (
-          <div className="mt-5 rounded-xl border border-gray-200 bg-white p-5 text-center">
-            <p className="text-sm font-medium text-gray-700">Wie möchtest du arbeiten?</p>
+          <div className="mt-5 rounded-xl border border-border bg-card p-5 text-center">
+            <p className="text-sm font-medium text-foreground">Wie möchtest du arbeiten?</p>
             <div className="mt-3 flex flex-col gap-2">
               <button
                 onClick={() => setWorkMode('free')}
-                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+                className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
               >
-                🗺️ Freies Outreach (über die Karte)
+                <MapTrifold size={18} aria-hidden="true" />
+                Freies Outreach (über die Karte)
               </button>
               <button
                 onClick={() => setWorkMode('list')}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex items-center justify-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
               >
-                📋 Aus der Aufgabenliste arbeiten
+                <ListChecks size={18} aria-hidden="true" />
+                Aus der Aufgabenliste arbeiten
               </button>
             </div>
           </div>
@@ -742,18 +867,21 @@ export default function Tasks() {
                 setWorkMode('unset')
                 setFreePoint(null)
                 setFreeAddress('')
+                setFreeBuildingBoundary(null)
+                setFreeFlyerCount(0)
                 setFreeMessage('')
               }}
-              className="text-xs font-medium text-teal-600 hover:text-teal-700"
+              className="text-xs font-medium text-primary hover:text-primary-hover"
             >
               ← Modus wechseln
             </button>
 
-            <p className="mt-2 text-xs text-gray-500">
-              Tipp auf der Karte auf das Haus/Geschäft, bei dem du gerade bist.
+            <p className="mt-2 text-xs text-muted-foreground">
+              Dein Standort wird automatisch verwendet. Falls die Adresse nicht stimmt, tipp auf der Karte den
+              richtigen Punkt an.
             </p>
 
-            <div className="mt-2 h-72 overflow-hidden rounded-2xl border border-gray-200">
+            <div className="mt-2 h-40 overflow-hidden rounded-2xl border border-border">
               <MapView
                 tasks={tasks
                   .filter((t) => t.lat != null && t.lng != null)
@@ -769,86 +897,115 @@ export default function Tasks() {
             {freePoint && (
               <form
                 onSubmit={handleFreeSubmit}
-                className="mt-3 space-y-2 rounded-xl border border-gray-200 bg-white p-3"
+                className="mt-3 space-y-3 rounded-xl border border-border bg-card p-3"
               >
+                <p className="text-sm text-muted-foreground">{freeAddress || 'Adresse unbekannt'}</p>
+
                 <div>
-                  <label className="block text-xs font-medium text-gray-600">Adresse</label>
-                  <input
-                    type="text"
-                    value={freeAddress}
-                    onChange={(e) => setFreeAddress(e.target.value)}
-                    required
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600">Kategorie</label>
-                  <select
-                    value={freeCategory}
-                    onChange={(e) => setFreeCategory(e.target.value)}
-                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  >
-                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <input
-                  type="file"
-                  name="photo"
-                  accept="image/*"
-                  required
-                  className="block w-full text-sm text-gray-600"
-                />
-                <input
-                  type="text"
-                  name="contact_name"
-                  placeholder="Name der Gesprächspartnerin/des Gesprächspartners (optional)"
-                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                />
-                <textarea
-                  name="comment"
-                  placeholder="Kommentar (optional), z.B. was ist passiert?"
-                  rows={2}
-                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                />
-                <div className="flex gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600">Geführte Gespräche</label>
-                    <input
-                      type="number"
-                      name="conversation_count"
-                      min={0}
-                      defaultValue={0}
-                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600">Platzierte Flyer</label>
+                  <label className="block text-sm font-medium text-foreground">Platzierte Flyer</label>
+                  <div className="mt-1 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFreeFlyerCount((n) => Math.max(0, n - 1))}
+                      className="h-10 w-10 rounded-lg border border-border text-lg font-semibold text-foreground hover:bg-muted"
+                    >
+                      −
+                    </button>
                     <input
                       type="number"
                       name="flyer_count"
                       min={0}
-                      defaultValue={0}
-                      className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      value={freeFlyerCount}
+                      onChange={(e) => setFreeFlyerCount(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-20 rounded-lg border border-border px-3 py-2 text-center text-lg font-semibold focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setFreeFlyerCount((n) => n + 1)}
+                      className="h-10 w-10 rounded-lg border border-border text-lg font-semibold text-foreground hover:bg-muted"
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
+
                 <button
                   type="submit"
                   disabled={freeSubmitting}
-                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                  className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
                 >
                   {freeSubmitting ? 'Wird gespeichert...' : 'Einreichen'}
                 </button>
+
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-xs font-medium text-primary hover:text-primary-hover">
+                    Mehr Details (optional)
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground">Adresse</label>
+                      <input
+                        type="text"
+                        value={freeAddress}
+                        onChange={(e) => setFreeAddress(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground">Kategorie</label>
+                      <select
+                        value={freeCategory}
+                        onChange={(e) => setFreeCategory(e.target.value)}
+                        className="mt-1 rounded-lg border border-border px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <input
+                        type="file"
+                        name="photo"
+                        accept="image/*"
+                        className="block w-full text-sm text-muted-foreground"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Foto optional – praktisch für schnelle Einträge z.B. an Spielplätzen ohne Foto pro Person.
+                      </p>
+                    </div>
+                    <input
+                      type="text"
+                      name="contact_name"
+                      placeholder="Name der Gesprächspartnerin/des Gesprächspartners (optional)"
+                      className="block w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <textarea
+                      name="comment"
+                      placeholder="Kommentar (optional), z.B. was ist passiert?"
+                      rows={2}
+                      className="block w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground">Geführte Gespräche</label>
+                      <input
+                        type="number"
+                        name="conversation_count"
+                        min={0}
+                        defaultValue={0}
+                        className="mt-1 w-24 rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  </div>
+                </details>
               </form>
             )}
 
             {freeMessage && (
               <p
-                className={`mt-3 text-sm ${freeMessage.startsWith('Fehler') ? 'text-red-600' : 'text-emerald-600'}`}
+                className={`mt-3 text-sm ${freeMessage.startsWith('Fehler') ? 'text-destructive' : 'text-status-erledigt'}`}
               >
                 {freeMessage}
               </p>
@@ -858,33 +1015,33 @@ export default function Tasks() {
           <div className="mt-5 flex items-center justify-between">
             <button
               onClick={() => setWorkMode('unset')}
-              className="text-xs font-medium text-teal-600 hover:text-teal-700"
+              className="text-xs font-medium text-primary hover:text-primary-hover"
             >
               ← Modus wechseln
             </button>
             <Link
               href="/tasks/new"
-              className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
+              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-hover"
             >
               + Aufgabe anlegen
             </Link>
           </div>
         )}
 
-        {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
+        {message && <p className="mt-3 text-sm text-destructive">{message}</p>}
 
         <details className="mt-5 w-fit">
-          <summary className="cursor-pointer list-none rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          <summary className="cursor-pointer list-none rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted">
             Status filtern {statusFilters.length > 0 ? `(${statusFilters.length})` : '(Alle)'}
           </summary>
-          <div className="mt-2 space-y-1 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+          <div className="mt-2 space-y-1 rounded-lg border border-border bg-card p-3">
             {['vorschlag', 'offen', 'in_bearbeitung', 'zur_pruefung', 'erledigt'].map((status) => (
-              <label key={status} className="flex items-center gap-2 text-sm text-gray-700">
+              <label key={status} className="flex items-center gap-2 text-sm text-foreground">
                 <input
                   type="checkbox"
                   checked={statusFilters.includes(status)}
                   onChange={() => toggleStatusFilter(status)}
-                  className="rounded border-gray-300"
+                  className="rounded border-border"
                 />
                 {STATUS_LABELS[status]}
               </label>
@@ -892,7 +1049,7 @@ export default function Tasks() {
             {statusFilters.length > 0 && (
               <button
                 onClick={() => setStatusFilters([])}
-                className="mt-1 text-xs font-medium text-teal-600 hover:text-teal-700"
+                className="mt-1 text-xs font-medium text-primary hover:text-primary-hover"
               >
                 Filter zurücksetzen
               </button>
@@ -901,29 +1058,29 @@ export default function Tasks() {
         </details>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-gray-500">Sortieren:</span>
+          <span className="text-xs font-medium text-muted-foreground">Sortieren:</span>
           <button
             onClick={() => setSortMode('newest')}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'newest' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'newest' ? 'bg-primary text-on-primary' : 'bg-muted text-foreground hover:bg-border'}`}
           >
             Neueste
           </button>
           <button
             onClick={() => setSortMode('oldest')}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'oldest' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'oldest' ? 'bg-primary text-on-primary' : 'bg-muted text-foreground hover:bg-border'}`}
           >
             Älteste
           </button>
           <button
             onClick={handleSortByDistance}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'distance' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${sortMode === 'distance' ? 'bg-primary text-on-primary' : 'bg-muted text-foreground hover:bg-border'}`}
           >
             Entfernung
           </button>
         </div>
-        {locationError && <p className="mt-1 text-xs text-red-600">{locationError}</p>}
+        {locationError && <p className="mt-1 text-xs text-destructive">{locationError}</p>}
         {sortMode === 'distance' && (
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             Aufgaben ohne Adresse/Koordinaten werden ans Ende sortiert.
           </p>
         )}
@@ -935,24 +1092,34 @@ export default function Tasks() {
               setSelectedForRoute(new Set())
               setRouteError('')
             }}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${routeMode ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${routeMode ? 'bg-primary text-on-primary' : 'bg-muted text-foreground hover:bg-border'}`}
           >
-            {routeMode ? '✕ Routenplanung beenden' : '🧭 Route für mehrere Aufgaben planen'}
+            {routeMode ? (
+              <>
+                <X size={14} aria-hidden="true" />
+                Routenplanung beenden
+              </>
+            ) : (
+              <>
+                <Compass size={14} aria-hidden="true" />
+                Route für mehrere Aufgaben planen
+              </>
+            )}
           </button>
 
           {routeMode && (
-            <div className="mt-2 space-y-2 rounded-xl border border-gray-200 bg-white p-3">
-              <span className="text-xs text-gray-500">
+            <div className="mt-2 space-y-2 rounded-xl border border-border bg-card p-3">
+              <span className="text-xs text-muted-foreground">
                 Wähl unten Aufgaben mit Häkchen aus ({selectedForRoute.size} ausgewählt).
               </span>
 
               <div className="flex flex-wrap gap-2">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600">Start</label>
+                  <label className="block text-xs font-medium text-muted-foreground">Start</label>
                   <select
                     value={routeStart}
                     onChange={(e) => setRouteStart(e.target.value)}
-                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className="mt-1 rounded-lg border border-border px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="current">Mein aktueller Standort</option>
                     {tasks
@@ -966,11 +1133,11 @@ export default function Tasks() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-600">Ziel</label>
+                  <label className="block text-xs font-medium text-muted-foreground">Ziel</label>
                   <select
                     value={routeEnd}
                     onChange={(e) => setRouteEnd(e.target.value)}
-                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className="mt-1 rounded-lg border border-border px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="auto">Automatisch (letzter Stopp)</option>
                     <option value="current">Mein aktueller Standort</option>
@@ -984,41 +1151,67 @@ export default function Tasks() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-gray-600">Verkehrsmittel</label>
-                  <select
-                    value={routeTravelMode}
-                    onChange={(e) => setRouteTravelMode(e.target.value as typeof routeTravelMode)}
-                    className="mt-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  >
-                    <option value="driving">Auto</option>
-                    <option value="walking">Zu Fuß</option>
-                    <option value="bicycling">Fahrrad</option>
-                    <option value="transit">Öffentliche Verkehrsmittel</option>
-                  </select>
-                </div>
               </div>
 
               <button
                 onClick={handleOpenRoute}
                 disabled={selectedForRoute.size === 0}
-                className="rounded-lg bg-teal-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
               >
                 Route berechnen
               </button>
 
               {routeLegs.length > 0 && (
                 <div className="space-y-1.5">
-                  <p className="text-xs text-gray-500">
-                    Tipp dich während der Tour Etappe für Etappe durch:
+                  <p className="text-xs text-muted-foreground">
+                    {routeLegs.length > 1
+                      ? 'Zu viele Stopps für einen Link – tipp dich durch die Abschnitte:'
+                      : 'Alle Stopps in einer Route:'}
                   </p>
                   {routeLegs.map((leg, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                    >
+                      <span className="text-sm text-foreground">{leg.label}</span>
+                      <div className="flex shrink-0 gap-1.5">
+                        <a
+                          href={leg.driving}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-xs font-medium text-primary-hover hover:bg-border"
+                        >
+                          <Car size={14} aria-hidden="true" />
+                          Auto
+                        </a>
+                        <a
+                          href={leg.walking}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-xs font-medium text-primary-hover hover:bg-border"
+                        >
+                          <PersonSimpleWalk size={14} aria-hidden="true" />
+                          Zu Fuß
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {routeTransitLegs.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Bus size={14} aria-hidden="true" />
+                    Öffentliche Verkehrsmittel (Fahrplan-abhängig, daher pro Etappe einzeln):
+                  </p>
+                  {routeTransitLegs.map((leg, i) => (
                     <a
                       key={i}
                       href={leg.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="block rounded-lg border border-gray-200 px-3 py-2 text-sm text-teal-700 hover:bg-gray-50"
+                      className="block rounded-lg border border-border px-3 py-2 text-sm text-primary-hover hover:bg-muted"
                     >
                       {leg.label}
                     </a>
@@ -1027,7 +1220,7 @@ export default function Tasks() {
               )}
             </div>
           )}
-          {routeError && <p className="mt-1 text-xs text-red-600">{routeError}</p>}
+          {routeError && <p className="mt-1 text-xs text-destructive">{routeError}</p>}
         </div>
 
         <ul className="mt-4 space-y-3">
@@ -1041,22 +1234,22 @@ export default function Tasks() {
             .map((task) => (
             <li
               key={task.id}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+              className="rounded-2xl border border-border bg-card p-4"
             >
               {editingTaskId === task.id ? (
                 <form onSubmit={(e) => handleSaveEdit(e, task.id)} className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Aufgabe {task.task_number}</p>
+                  <p className="text-sm font-medium text-foreground">Aufgabe {task.task_number}</p>
                   <input
                     name="edit_address"
                     defaultValue={task.address ?? ''}
                     placeholder="Adresse (optional)"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className="block w-full rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <select
                     name="edit_area"
                     defaultValue={task.area_id ?? ''}
                     required
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className="block w-full rounded-lg border border-border px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="" disabled>
                       Gebiet wählen...
@@ -1070,14 +1263,14 @@ export default function Tasks() {
                   <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
+                      className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-hover"
                     >
                       Speichern
                     </button>
                     <button
                       type="button"
                       onClick={() => setEditingTaskId(null)}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
                     >
                       Abbrechen
                     </button>
@@ -1091,12 +1284,12 @@ export default function Tasks() {
                         type="checkbox"
                         checked={selectedForRoute.has(task.id)}
                         onChange={() => toggleTaskForRoute(task.id)}
-                        className="mt-1 rounded border-gray-300"
+                        className="mt-1 rounded border-border"
                       />
                     )}
                     <div>
-                    <p className="font-medium text-gray-900">Aufgabe {task.task_number}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="font-medium text-foreground">Aufgabe {task.task_number}</p>
+                    <p className="text-xs text-muted-foreground">
                       {[
                         task.area_id
                           ? areas.find((a) => a.id === task.area_id)?.name ?? 'Unbekanntes Gebiet'
@@ -1107,29 +1300,30 @@ export default function Tasks() {
                         .join(' · ')}
                     </p>
                     {task.address_list && (
-                      <p className="mt-0.5 text-xs text-gray-500">{task.address_list}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{task.address_list}</p>
                     )}
                     {task.address && (
                       <a
                         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.address)}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-0.5 inline-block text-xs font-medium text-teal-600 hover:text-teal-700"
+                        className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover"
                       >
-                        📍 {task.address} – Route öffnen
+                        <MapPin size={12} aria-hidden="true" />
+                        {task.address} – Route öffnen
                       </a>
                     )}
                     {role === 'organizer' && (
                       <div className="mt-0.5 flex gap-3">
                         <button
                           onClick={() => setEditingTaskId(task.id)}
-                          className="text-xs font-medium text-gray-500 hover:text-teal-600"
+                          className="text-xs font-medium text-muted-foreground hover:text-primary"
                         >
                           Bearbeiten
                         </button>
                         <button
                           onClick={() => handleDeleteTask(task.id)}
-                          className="text-xs font-medium text-gray-500 hover:text-red-600"
+                          className="text-xs font-medium text-muted-foreground hover:text-destructive"
                         >
                           Löschen
                         </button>
@@ -1142,7 +1336,7 @@ export default function Tasks() {
               )}
 
               {role === 'organizer' && task.assigned_to && assigneeEmails[task.assigned_to] && (
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-muted-foreground">
                   Bearbeitet von: {assigneeEmails[task.assigned_to]}
                 </p>
               )}
@@ -1157,7 +1351,7 @@ export default function Tasks() {
                   </button>
                   <button
                     onClick={() => handleRejectProposal(task.id)}
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
                   >
                     Ablehnen
                   </button>
@@ -1165,13 +1359,13 @@ export default function Tasks() {
               )}
 
               {task.status === 'vorschlag' && role !== 'organizer' && (
-                <p className="mt-3 text-sm text-gray-500">Wartet auf Freigabe durch den Organisator</p>
+                <p className="mt-3 text-sm text-muted-foreground">Wartet auf Freigabe durch den Organisator</p>
               )}
 
               {task.status === 'offen' && (
                 <button
                   onClick={() => handleClaim(task.id)}
-                  className="mt-3 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700"
+                  className="mt-3 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-hover"
                 >
                   Aufgabe übernehmen
                 </button>
@@ -1182,28 +1376,32 @@ export default function Tasks() {
                   onSubmit={(e) => handleSubmitForReview(e, task)}
                   className="mt-3 space-y-2"
                 >
-                  <input
-                    type="file"
-                    name="photo"
-                    accept="image/*"
-                    required
-                    className="block w-full text-sm text-gray-600"
-                  />
+                  <div>
+                    <input
+                      type="file"
+                      name="photo"
+                      accept="image/*"
+                      className="block w-full text-sm text-muted-foreground"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Foto optional – praktisch für schnelle Einträge z.B. an Spielplätzen ohne Foto pro Person.
+                    </p>
+                  </div>
                   <textarea
                     name="comment"
                     placeholder="Kommentar (optional), z.B. was ist passiert?"
                     rows={2}
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className="block w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <input
                     type="text"
                     name="contact_name"
                     placeholder="Name der Gesprächspartnerin/des Gesprächspartners (optional)"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className="block w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <div className="flex gap-3">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-muted-foreground">
                         Geführte Gespräche
                       </label>
                       <input
@@ -1211,11 +1409,11 @@ export default function Tasks() {
                         name="conversation_count"
                         min={0}
                         defaultValue={0}
-                        className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        className="mt-1 w-24 rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-muted-foreground">
                         Platzierte Flyer
                       </label>
                       <input
@@ -1223,7 +1421,7 @@ export default function Tasks() {
                         name="flyer_count"
                         min={0}
                         defaultValue={0}
-                        className="mt-1 w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        className="mt-1 w-24 rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       />
                     </div>
                   </div>
@@ -1238,7 +1436,7 @@ export default function Tasks() {
               )}
 
               {task.status === 'in_bearbeitung' && task.assigned_to !== session.user.id && (
-                <p className="mt-3 text-sm text-gray-500">wird bereits bearbeitet</p>
+                <p className="mt-3 text-sm text-muted-foreground">wird bereits bearbeitet</p>
               )}
 
               {(task.status === 'zur_pruefung' || task.status === 'erledigt') && (
@@ -1251,20 +1449,20 @@ export default function Tasks() {
                       className="max-h-64 w-full rounded-lg object-cover"
                     />
                   )}
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Geführte Gespräche: <span className="font-medium">{task.conversation_count}</span> · Platzierte
                     Flyer: <span className="font-medium">{task.flyer_count}</span>
                   </p>
                   {task.contact_name && (
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-muted-foreground">
                       Gesprächspartner: <span className="font-medium">{task.contact_name}</span>
                     </p>
                   )}
                   {task.status === 'erledigt' && (
-                    <p className="text-sm font-medium text-emerald-700">+{task.points} Punkte</p>
+                    <p className="text-sm font-medium text-status-erledigt">+{task.points} Punkte</p>
                   )}
                   {task.comment && (
-                    <p className="rounded-lg bg-gray-50 p-2 text-sm text-gray-700">{task.comment}</p>
+                    <p className="rounded-lg bg-muted p-2 text-sm text-foreground">{task.comment}</p>
                   )}
                 </div>
               )}
@@ -1279,7 +1477,7 @@ export default function Tasks() {
                   </button>
                   <button
                     onClick={() => handleReject(task.id)}
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
                   >
                     Ablehnen
                   </button>
@@ -1287,7 +1485,7 @@ export default function Tasks() {
               )}
 
               {task.status === 'zur_pruefung' && role !== 'organizer' && (
-                <p className="mt-3 text-sm text-gray-500">Wartet auf Bestätigung durch den Organisator</p>
+                <p className="mt-3 text-sm text-muted-foreground">Wartet auf Bestätigung durch den Organisator</p>
               )}
             </li>
           ))}
@@ -1296,7 +1494,7 @@ export default function Tasks() {
               (statusFilters.length === 0 || statusFilters.includes(task.status)) &&
               (!filterAreaId || task.area_id === filterAreaId)
           ).length === 0 && (
-            <li className="text-sm text-gray-500">Keine Aufgaben mit diesem Status/Gebiet.</li>
+            <li className="text-sm text-muted-foreground">Keine Aufgaben mit diesem Status/Gebiet.</li>
           )}
         </ul>
       </div>

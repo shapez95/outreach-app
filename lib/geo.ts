@@ -19,18 +19,31 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
 }
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  const result = await reverseGeocodeWithBuilding(lat, lng)
+  return result.address
+}
+
+// Also asks Nominatim for the matched OSM object's outline (polygon_geojson=1), which is the
+// building footprint when the reverse-geocode hit is a building - used to shade the whole
+// building on the map instead of just a point.
+export async function reverseGeocodeWithBuilding(
+  lat: number,
+  lng: number
+): Promise<{ address: string | null; boundary: Geometry | null }> {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`
+      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&polygon_geojson=1&lat=${lat}&lon=${lng}`
     )
     const data = await res.json()
     const addr = data?.address
-    if (addr?.road) {
-      return [addr.road, addr.house_number].filter(Boolean).join(' ')
-    }
-    return data?.display_name ?? null
+    const address = addr?.road
+      ? [addr.road, addr.house_number].filter(Boolean).join(' ')
+      : (data?.display_name ?? null)
+    const geometry = data?.geojson as Geometry | undefined
+    const boundary = geometry && (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') ? geometry : null
+    return { address, boundary }
   } catch {
-    return null
+    return { address: null, boundary: null }
   }
 }
 

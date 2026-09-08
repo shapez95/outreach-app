@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session } from '@supabase/supabase-js'
+import { SignOut } from '@phosphor-icons/react'
 import { supabase } from '@/lib/supabase'
 
 export default function Account() {
@@ -26,7 +27,7 @@ export default function Account() {
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="text-gray-500">Lade...</p>
+        <p className="text-muted-foreground">Lade...</p>
       </main>
     )
   }
@@ -34,11 +35,11 @@ export default function Account() {
   if (!session) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">Du musst eingeloggt sein.</p>
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">Du musst eingeloggt sein.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
           >
             Zum Login
           </Link>
@@ -50,17 +51,18 @@ export default function Account() {
   return (
     <main className="flex flex-1 flex-col items-center px-4 py-10">
       <div className="w-full max-w-md">
-        <h1 className="text-2xl font-bold text-gray-900">Konto</h1>
+        <h1 className="text-2xl font-bold text-foreground">Konto</h1>
 
-        <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">E-Mail</p>
-          <p className="font-medium text-gray-900">{session.user.email}</p>
+        <div className="mt-4 rounded-2xl border border-border bg-card p-5">
+          <p className="text-sm text-muted-foreground">E-Mail</p>
+          <p className="font-medium text-foreground">{session.user.email}</p>
         </div>
 
         <button
           onClick={handleLogout}
-          className="mt-4 w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
         >
+          <SignOut size={18} aria-hidden="true" />
           Ausloggen
         </button>
       </div>

@@ -372,7 +372,7 @@ export default function NewTask() {
   if (loadingSession) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="text-gray-500">Lade...</p>
+        <p className="text-muted-foreground">Lade...</p>
       </main>
     )
   }
@@ -380,11 +380,11 @@ export default function NewTask() {
   if (!session) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">Du musst eingeloggt sein.</p>
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">Du musst eingeloggt sein.</p>
           <Link
             href="/login"
-            className="mt-4 inline-block rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
           >
             Zum Login
           </Link>
@@ -396,8 +396,8 @@ export default function NewTask() {
   if (orgChecked && !organization) {
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm text-gray-600">
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">
             Du bist noch keiner Organisation beigetreten. Frag deinen Organisator nach dem Einladungscode.
           </p>
         </div>
@@ -409,18 +409,18 @@ export default function NewTask() {
     <main className="flex flex-1 justify-center px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">Aufgabe anlegen</h1>
-          <Link href="/tasks" className="text-sm font-medium text-teal-600 hover:text-teal-700">
+          <h1 className="text-2xl font-bold text-foreground">Aufgabe anlegen</h1>
+          <Link href="/tasks" className="text-sm font-medium text-primary hover:text-primary-hover">
             ← Zur Aufgabenliste
           </Link>
         </div>
 
         {areas.length === 0 ? (
-          <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+          <div className="mt-5 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
             Es gibt noch kein Gebiet für diese Organisation. Aufgaben können erst angelegt werden, wenn
             mindestens ein Gebiet existiert.{' '}
             {role === 'organizer' ? (
-              <Link href="/areas" className="font-medium text-teal-600 hover:text-teal-700">
+              <Link href="/areas" className="font-medium text-primary hover:text-primary-hover">
                 Jetzt Gebiet anlegen
               </Link>
             ) : (
@@ -435,7 +435,7 @@ export default function NewTask() {
                   value={newAreaId}
                   onChange={(e) => setNewAreaId(e.target.value)}
                   required
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value="" disabled>
                     Gebiet wählen...
@@ -452,11 +452,11 @@ export default function NewTask() {
                   value={newAddress}
                   onChange={(e) => setNewAddress(e.target.value)}
                   required
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <button
                   type="submit"
-                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover"
                 >
                   Anlegen
                 </button>
@@ -464,9 +464,9 @@ export default function NewTask() {
             </form>
 
             {role === 'organizer' && (
-              <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
-                <p className="text-sm font-medium text-gray-700">Excel-Import</p>
-                <p className="mt-0.5 text-xs text-gray-500">
+              <div className="mt-3 rounded-xl border border-border bg-card p-3">
+                <p className="text-sm font-medium text-foreground">Excel-Import</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   Datei mit Spalten <span className="font-mono">Name</span> und{' '}
                   <span className="font-mono">Adresse</span> (optional{' '}
                   <span className="font-mono">Kategorie</span>). Das Gebiet wird automatisch anhand der
@@ -477,10 +477,10 @@ export default function NewTask() {
                   accept=".xlsx,.xls,.csv"
                   onChange={handleExcelUpload}
                   disabled={excelSubmitting}
-                  className="mt-2 block w-full text-sm text-gray-600"
+                  className="mt-2 block w-full text-sm text-muted-foreground"
                 />
                 {excelSubmitting && (
-                  <p className="mt-1 text-xs text-gray-500">{excelProgress || 'Wird verarbeitet...'}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{excelProgress || 'Wird verarbeitet...'}</p>
                 )}
               </div>
             )}
@@ -489,7 +489,7 @@ export default function NewTask() {
               <div className="mt-3">
                 <button
                   onClick={() => setBulkOpen((open) => !open)}
-                  className="text-sm font-medium text-teal-600 hover:text-teal-700"
+                  className="text-sm font-medium text-primary hover:text-primary-hover"
                 >
                   {bulkOpen ? '– Mehrere Aufgaben auf einmal schließen' : '+ Mehrere Aufgaben auf einmal anlegen'}
                 </button>
@@ -497,14 +497,14 @@ export default function NewTask() {
                 {bulkOpen && (
                   <form
                     onSubmit={handleBulkCreate}
-                    className="mt-2 space-y-2 rounded-xl border border-gray-200 bg-white p-3"
+                    className="mt-2 space-y-2 rounded-xl border border-border bg-card p-3"
                   >
                     <div className="flex gap-2">
                       <select
                         value={bulkAreaId}
                         onChange={(e) => setBulkAreaId(e.target.value)}
                         required
-                        className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       >
                         <option value="">Gebiet wählen...</option>
                         {areas.map((area) => (
@@ -516,7 +516,7 @@ export default function NewTask() {
                       <select
                         value={bulkCategory}
                         onChange={(e) => setBulkCategory(e.target.value)}
-                        className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       >
                         {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
                           <option key={value} value={value}>
@@ -534,7 +534,7 @@ export default function NewTask() {
                             onClick={() =>
                               setBulkAddresses((current) => (current ? `${current}\n${brand}, ` : `${brand}, `))
                             }
-                            className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+                            className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-foreground hover:bg-border"
                           >
                             + {brand}
                           </button>
@@ -542,7 +542,7 @@ export default function NewTask() {
                         <button
                           type="button"
                           onClick={() => setBulkAddresses((current) => (current ? `${current}\n` : ''))}
-                          className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+                          className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-foreground hover:bg-border"
                         >
                           + Sonstiges (frei eintippen)
                         </button>
@@ -554,9 +554,9 @@ export default function NewTask() {
                       placeholder={'Eine Zeile pro Ort, z.B.\nREWE, Musterstraße 1\nMcFit, Musterstraße 3\nMusterstraße 5 (ohne Name)'}
                       rows={5}
                       required
-                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      className="block w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-muted-foreground">
                       Format: <span className="font-mono">Name, Adresse</span> oder nur die Adresse. Bei
                       "Privathaushalt" werden bis zu {MAX_HOUSEHOLDS_PER_BUNDLE} Adressen automatisch zu
                       einer Aufgabe gebündelt, bei den anderen Kategorien entsteht eine Aufgabe pro Zeile.
@@ -564,7 +564,7 @@ export default function NewTask() {
                     <button
                       type="submit"
                       disabled={bulkSubmitting}
-                      className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
                     >
                       {bulkSubmitting ? 'Adressen werden gesucht...' : 'Aufgaben anlegen'}
                     </button>
@@ -576,7 +576,7 @@ export default function NewTask() {
         )}
 
         {message && (
-          <p className={`mt-3 text-sm ${message.startsWith('Fehler') ? 'text-red-600' : 'text-emerald-600'}`}>
+          <p className={`mt-3 text-sm ${message.startsWith('Fehler') ? 'text-destructive' : 'text-status-erledigt'}`}>
             {message}
           </p>
         )}

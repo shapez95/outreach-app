@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import type { Session } from '@supabase/supabase-js'
+import { House, FlagBanner, UserCircle } from '@phosphor-icons/react'
 import { supabase } from '@/lib/supabase'
 
 type Membership = {
@@ -11,6 +13,7 @@ type Membership = {
 }
 
 export default function BottomNav() {
+  const pathname = usePathname()
   const [session, setSession] = useState<Session | null>(null)
   const [memberships, setMemberships] = useState<Membership[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -63,36 +66,36 @@ export default function BottomNav() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full rounded-t-2xl bg-white p-4 pb-8"
+            className="w-full rounded-t-2xl bg-card p-4 pb-8"
           >
-            <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Organisation wählen
             </p>
             <div className="space-y-2">
               {memberships.map((m) => (
                 <div
                   key={m.organizations?.id}
-                  className="rounded-xl border border-gray-200 px-4 py-3 text-sm"
+                  className="rounded-xl border border-border px-4 py-3 text-sm"
                 >
                   <button
                     onClick={() => m.organizations && handlePickOrg(m.organizations.id)}
-                    className="flex w-full items-center justify-between text-left hover:text-teal-700"
+                    className="flex w-full items-center justify-between text-left hover:text-primary-hover"
                   >
-                    <span className="font-medium text-gray-900">{m.organizations?.name}</span>
-                    <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
+                    <span className="font-medium text-foreground">{m.organizations?.name}</span>
+                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
                       {m.role === 'organizer' ? 'Organisator' : 'Helfer'}
                     </span>
                   </button>
                   {m.role === 'organizer' && m.organizations && (
                     <div className="mt-2">
                       {inviteCodes[m.organizations.id] ? (
-                        <p className="font-mono text-sm font-semibold tracking-wider text-gray-900">
+                        <p className="font-mono text-sm font-semibold tracking-wider text-foreground">
                           Code: {inviteCodes[m.organizations.id]}
                         </p>
                       ) : (
                         <button
                           onClick={() => handleShowCode(m.organizations!.id)}
-                          className="text-xs font-medium text-teal-600 hover:text-teal-700"
+                          className="text-xs font-medium text-primary hover:text-primary-hover"
                         >
                           Einladungscode anzeigen
                         </button>
@@ -102,12 +105,12 @@ export default function BottomNav() {
                 </div>
               ))}
               {memberships.length === 0 && (
-                <p className="text-sm text-gray-500">Noch keiner Organisation beigetreten.</p>
+                <p className="text-sm text-muted-foreground">Noch keiner Organisation beigetreten.</p>
               )}
               <Link
                 href="/join"
                 onClick={() => setPickerOpen(false)}
-                className="block rounded-xl border border-dashed border-gray-300 px-4 py-3 text-center text-sm font-medium text-teal-600 hover:bg-gray-50"
+                className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm font-medium text-primary hover:bg-muted"
               >
                 Beitreten / Gründen
               </Link>
@@ -116,28 +119,42 @@ export default function BottomNav() {
         </div>
       )}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-gray-200 bg-white">
-        <Link
-          href="/"
-          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-gray-600 hover:text-teal-600"
-        >
-          <span className="text-lg">🏠</span>
-          Start
-        </Link>
+      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-border bg-card">
+        {(() => {
+          const active = pathname === '/'
+          return (
+            <Link
+              href="/"
+              aria-current={active ? 'page' : undefined}
+              className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium ${active ? 'text-primary' : 'text-muted-foreground hover:text-primary'}`}
+            >
+              <House size={22} weight={active ? 'fill' : 'regular'} aria-hidden="true" />
+              Start
+            </Link>
+          )
+        })()}
         <button
           onClick={() => setPickerOpen(true)}
-          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-gray-600 hover:text-teal-600"
+          aria-haspopup="dialog"
+          aria-expanded={pickerOpen}
+          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-muted-foreground hover:text-primary"
         >
-          <span className="text-lg">🏳️</span>
+          <FlagBanner size={22} aria-hidden="true" />
           Organisationen
         </button>
-        <Link
-          href="/account"
-          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-gray-600 hover:text-teal-600"
-        >
-          <span className="text-lg">👤</span>
-          Konto
-        </Link>
+        {(() => {
+          const active = pathname === '/account'
+          return (
+            <Link
+              href="/account"
+              aria-current={active ? 'page' : undefined}
+              className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium ${active ? 'text-primary' : 'text-muted-foreground hover:text-primary'}`}
+            >
+              <UserCircle size={22} weight={active ? 'fill' : 'regular'} aria-hidden="true" />
+              Konto
+            </Link>
+          )
+        })()}
       </nav>
     </>
   )
