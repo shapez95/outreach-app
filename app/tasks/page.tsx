@@ -155,6 +155,9 @@ export default function Tasks() {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setLoadingSession(false)
+    }).catch((err) => {
+      console.error('Supabase-Session konnte nicht geladen werden:', err)
+      setLoadingSession(false)
     })
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {

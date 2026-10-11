@@ -20,6 +20,9 @@ export default function Join() {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setLoadingSession(false)
+    }).catch((err) => {
+      console.error('Supabase-Session konnte nicht geladen werden:', err)
+      setLoadingSession(false)
     })
   }, [])
 
